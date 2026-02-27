@@ -1,0 +1,44 @@
+{
+  "name": "MUSICANA",
+  "short_name": "MUSICANA",
+  "description": "Stream music with synchronized lyrics powered by YouTube Music",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "scope": "/",
+  "categories": ["music", "entertainment"],
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/wilooper/Asset/main/logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://raw.githubusercontent.com/wilooper/Asset/main/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Search Music",
+      "short_name": "Search",
+      "description": "Search for songs, artists, albums",
+      "url": "/?focus=search",
+      "icons": [{ "src": "https://raw.githubusercontent.com/wilooper/Asset/main/logo.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Your Library",
+      "short_name": "Library",
+      "description": "Open your music library",
+      "url": "/library",
+      "icons": [{ "src": "https://raw.githubusercontent.com/wilooper/Asset/main/logo.png", "sizes": "96x96" }]
+    }
+  ],
+  "screenshots": [],
+  "prefer_related_applications": false
+}
