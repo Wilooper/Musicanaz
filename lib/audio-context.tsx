@@ -25,7 +25,6 @@ interface AudioContextType {
   isCached:          boolean
   isLoading:         boolean
   playSong:          (song: Song, isManual?: boolean, startTime?: number) => void
-  // Play a user playlist as queue — no upnext fetch, uses playlist songs directly
   playPlaylist:      (songs: Song[], startIndex?: number) => void
   togglePlayPause:   () => void
   seek:              (time: number) => void
@@ -33,7 +32,6 @@ interface AudioContextType {
   playNext:          () => void
   playPrev:          () => void
   stopSong:          () => void
-  // Queue manipulation
   removeFromQueue:   (index: number) => void
   moveInQueue:       (fromIndex: number, toIndex: number) => void
   audioRef:          React.RefObject<HTMLAudioElement>
@@ -45,6 +43,14 @@ interface AudioContextType {
   stopParty:         () => void
   joinParty:         (id: string) => void
   addToPartyQueue:   (song: Song) => Promise<boolean>
+  // Smart Queue Suggestions
+  queueExhausted:    boolean
+  suggestions:       Song[]
+  dismissSuggestions: () => void
+  playFromSuggestions:(songs: Song[]) => void
+  // Crossfade
+  crossfadeSecs:     number
+  setCrossfadeSecs:  (secs: number) => void
 }
 
 const AudioCtx = createContext<AudioContextType | undefined>(undefined)
@@ -132,9 +138,33 @@ export function AudioProvider({ children }: { children: ReactNode }) {
   const partyIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const listenTickRef    = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  // Smart Queue Suggestions
+  const [queueExhausted, setQueueExhausted] = useState(false)
+  const [suggestions,    setSuggestions]    = useState<Song[]>([])
+
+  // Crossfade
+  const [crossfadeSecs, setCrossfadeSecsState] = useState(0)
+  const crossfadeSecsRef  = useRef(0)
+  const fadeMultiplierRef = useRef(1)   // 1.0 = full, 0.0 = silent
+  const fadingOutRef      = useRef(false)
+  const fadingInRef       = useRef(false)
+  const fadeInTimerRef    = useRef<ReturnType<typeof setInterval> | null>(null)
+
   // Keep refs in sync with state
   useEffect(() => { queueRef.current = queue }, [queue])
   useEffect(() => { queueIndexRef.current = queueIndex }, [queueIndex])
+
+  // Load crossfade setting from prefs on mount
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    try {
+      const { getPreferences } = require("./storage")
+      const prefs = getPreferences()
+      const secs  = prefs.crossfadeSecs ?? 0
+      setCrossfadeSecsState(secs)
+      crossfadeSecsRef.current = secs
+    } catch {}
+  }, [])
 
   // ── hidden YT container ──────────────────────────────────
   useEffect(() => {
@@ -164,16 +194,87 @@ export function AudioProvider({ children }: { children: ReactNode }) {
     setCurrentLyricIndex(p => p !== idx ? idx : p)
   }, [lyrics])
 
-  // ── poll YT time ─────────────────────────────────────────
+  // ── poll YT time — also drives crossfade ─────────────────
+  const currentSongRef = useRef<Song | null>(null)
+  useEffect(() => { currentSongRef.current = currentSong }, [currentSong])
+  const durationRef = useRef(0)
+  useEffect(() => { durationRef.current = duration }, [duration])
+
   useEffect(() => {
     if (intervalRef.current) clearInterval(intervalRef.current)
     intervalRef.current = setInterval(() => {
       const p = ytPlayerRef.current
       if (!p || typeof p.getCurrentTime !== "function") return
-      try { const ct = p.getCurrentTime(); setCurrentTime(ct); syncLyrics(ct) } catch {}
+      try {
+        const ct  = p.getCurrentTime()
+        const dur = durationRef.current
+        setCurrentTime(ct)
+        syncLyrics(ct)
+
+        // ── Crossfade fade-out ──────────────────────────────
+        const cf = crossfadeSecsRef.current
+        if (cf > 0 && dur > 0 && ct > 0 && !fadingOutRef.current) {
+          const remaining = dur - ct
+          if (remaining <= cf && remaining > 0) {
+            fadingOutRef.current = true
+            // Ramp volume down to 0 over `cf` seconds (tick every 200ms)
+            const steps   = (remaining / 0.2)
+            const decrement = (volumeRef.current / steps)
+            let   curVol    = volumeRef.current
+            const fadeTimer = setInterval(() => {
+              curVol = Math.max(0, curVol - decrement)
+              if (ytPlayerRef.current && typeof ytPlayerRef.current.setVolume === "function") {
+                try { ytPlayerRef.current.setVolume(curVol) } catch {}
+              }
+              if (curVol <= 0) clearInterval(fadeTimer)
+            }, 200)
+          }
+        }
+      } catch {}
     }, 500)
     return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
   }, [syncLyrics])
+
+  // ── Media Session API — lock screen / notification controls ─
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return
+    if (!currentSong) return
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title:  currentSong.title,
+        artist: currentSong.artist,
+        album:  (currentSong as any).album || "MUSICANA",
+        artwork: currentSong.thumbnail ? [
+          { src: `https://images.weserv.nl/?url=${encodeURIComponent(currentSong.thumbnail)}&w=512&h=512&output=jpg`, sizes: "512x512", type: "image/jpeg" },
+          { src: `https://images.weserv.nl/?url=${encodeURIComponent(currentSong.thumbnail)}&w=256&h=256&output=jpg`, sizes: "256x256", type: "image/jpeg" },
+          { src: `https://images.weserv.nl/?url=${encodeURIComponent(currentSong.thumbnail)}&w=96&h=96&output=jpg`,   sizes: "96x96",   type: "image/jpeg" },
+        ] : [],
+      })
+      navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused"
+    } catch {}
+  }, [currentSong, isPlaying])
+
+  // Register Media Session action handlers once
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return
+    const handlers: Array<[MediaSessionAction, MediaSessionActionHandler]> = [
+      ["play",           () => { const p = ytPlayerRef.current; if (p) try { p.playVideo() } catch {} }],
+      ["pause",          () => { const p = ytPlayerRef.current; if (p) try { p.pauseVideo() } catch {} }],
+      ["nexttrack",      () => { playNext() }],
+      ["previoustrack",  () => { playPrev() }],
+      ["seekto",         (d) => { if (d.seekTime != null) seek(d.seekTime) }],
+      ["seekforward",    (d) => { seek(Math.min((durationRef.current), (ytPlayerRef.current?.getCurrentTime?.() || 0) + (d.seekOffset || 10))) }],
+      ["seekbackward",   (d) => { seek(Math.max(0, (ytPlayerRef.current?.getCurrentTime?.() || 0) - (d.seekOffset || 10))) }],
+    ]
+    for (const [action, handler] of handlers) {
+      try { navigator.mediaSession.setActionHandler(action, handler) } catch {}
+    }
+    return () => {
+      for (const [action] of handlers) {
+        try { navigator.mediaSession.setActionHandler(action, null) } catch {}
+      }
+    }
+  }, []) // eslint-disable-line
 
   // ── sync volume ─────────────────────────────────────────
   useEffect(() => {
@@ -298,19 +399,45 @@ export function AudioProvider({ children }: { children: ReactNode }) {
             } else if (e.data === S.ENDED) {
               setIsPlaying(false)
               setCurrentTime(0)
+              fadingOutRef.current = false
+              // Restore volume for next song
+              if (ytPlayerRef.current && typeof ytPlayerRef.current.setVolume === "function") {
+                try { ytPlayerRef.current.setVolume(volumeRef.current) } catch {}
+              }
               // ─── Auto-advance through the EXISTING queue ───────────────
-              // Read directly from refs — no setState needed, no stale closure
-              const currentIdx = queueIndexRef.current
+              const currentIdx   = queueIndexRef.current
               const currentQueue = queueRef.current
-              const nextIdx = currentIdx + 1
+              const nextIdx      = currentIdx + 1
               if (nextIdx < currentQueue.length) {
                 const nextSong = currentQueue[nextIdx]
                 queueIndexRef.current = nextIdx
                 setQueueIndex(nextIdx)
-                // Small timeout to let state settle
                 setTimeout(() => _advanceToSong(nextSong), 50)
+              } else {
+                // Queue exhausted — fetch suggestions
+                const curSong = currentSongRef.current
+                if (curSong) {
+                  const vid = curSong.videoId || curSong.id
+                  fetch(`/api/musiva/upnext?videoId=${encodeURIComponent(vid)}`)
+                    .then(r => r.json())
+                    .then(data => {
+                      if (data.tracks?.length) {
+                        const songs = data.tracks.slice(0, 5).map((t: any) => ({
+                          id: t.videoId || "", title: t.title || "Unknown",
+                          artist: Array.isArray(t.artists)
+                            ? t.artists.map((a: any) => typeof a === "string" ? a : a?.name || "").join(", ")
+                            : String(t.artists || t.artist || "Unknown"),
+                          thumbnail: t.thumbnail || (Array.isArray(t.thumbnails) ? (typeof t.thumbnails[0] === "string" ? t.thumbnails[0] : t.thumbnails[0]?.url) || "" : ""),
+                          type: "musiva" as const, videoId: t.videoId || "",
+                          duration: t.duration || "", album: typeof t.album === "string" ? t.album : t.album?.name || "",
+                        })).filter((s: any) => s.id)
+                        setSuggestions(songs)
+                        setQueueExhausted(true)
+                      }
+                    })
+                    .catch(() => {})
+                }
               }
-              // If end of queue, just stop — don't fetch a new queue
             }
           },
           onError: () => {
@@ -330,6 +457,8 @@ export function AudioProvider({ children }: { children: ReactNode }) {
   const _advanceToSong = useCallback(async (song: Song, startTime = 0) => {
     if (isLoadingRef.current) return
     isLoadingRef.current = true
+    setQueueExhausted(false)
+    setSuggestions([])
     try {
       setIsLoading(true)
       setIsCached(false)
@@ -345,7 +474,31 @@ export function AudioProvider({ children }: { children: ReactNode }) {
       const videoId = song.videoId || song.id
       await loadYTApi()
       await loadVideo(videoId, startTime)
-      // ⬆ NO fetchUpNext here — queue stays intact
+
+      // Crossfade fade-in: start at 0 then ramp up
+      const cf = crossfadeSecsRef.current
+      if (cf > 0) {
+        fadingInRef.current = true
+        if (ytPlayerRef.current && typeof ytPlayerRef.current.setVolume === "function") {
+          try { ytPlayerRef.current.setVolume(0) } catch {}
+        }
+        let curVol = 0
+        const target = volumeRef.current
+        const steps  = (cf / 0.2)
+        const inc    = target / steps
+        if (fadeInTimerRef.current) clearInterval(fadeInTimerRef.current)
+        fadeInTimerRef.current = setInterval(() => {
+          curVol = Math.min(target, curVol + inc)
+          if (ytPlayerRef.current && typeof ytPlayerRef.current.setVolume === "function") {
+            try { ytPlayerRef.current.setVolume(curVol) } catch {}
+          }
+          if (curVol >= target) {
+            clearInterval(fadeInTimerRef.current!)
+            fadeInTimerRef.current = null
+            fadingInRef.current = false
+          }
+        }, 200)
+      }
     } catch (err) {
       console.error("[AudioProvider] advance error:", err)
       setIsPlaying(false)
@@ -548,6 +701,26 @@ export function AudioProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const dismissSuggestions = useCallback(() => {
+    setQueueExhausted(false)
+    setSuggestions([])
+  }, [])
+
+  const playFromSuggestions = useCallback((songs: Song[]) => {
+    setQueueExhausted(false)
+    setSuggestions([])
+    if (songs.length > 0) playPlaylist(songs, 0)
+  }, []) // eslint-disable-line
+
+  const setCrossfadeSecs = useCallback((secs: number) => {
+    crossfadeSecsRef.current = secs
+    setCrossfadeSecsState(secs)
+    try {
+      const { savePreferences } = require("./storage")
+      savePreferences({ crossfadeSecs: secs })
+    } catch {}
+  }, [])
+
   const stopSong = useCallback(() => {
     const p = ytPlayerRef.current
     if (p && typeof p.stopVideo === "function") try { p.stopVideo() } catch {}
@@ -660,6 +833,8 @@ export function AudioProvider({ children }: { children: ReactNode }) {
       removeFromQueue, moveInQueue,
       audioRef, ytPlayerRef,
       partyId, isPartyHost, startParty, stopParty, joinParty, addToPartyQueue,
+      queueExhausted, suggestions, dismissSuggestions, playFromSuggestions,
+      crossfadeSecs, setCrossfadeSecs,
     }}>
       {children}
       <audio ref={audioRef} style={{ display: "none" }} />

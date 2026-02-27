@@ -8,7 +8,7 @@ import {
   ListMusic, Music, GripVertical, Trash2, ChevronUp, ChevronDown as ChevronDownIcon,
   Zap, Download, Check, Radio, Loader2 as SpinnerIcon,
   Type, Languages, Sparkles, RotateCcw, Share2, Link2 as Link,
-  Maximize2, Timer, Users, QrCode, Copy, Clock,
+  Maximize2, Timer, Users, QrCode, Copy, Clock, Smile,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import ImageWithFallback from "@/components/image-with-fallback"
@@ -18,6 +18,7 @@ import {
   isLiked, toggleLike, getPlaylists,
   addSongToPlaylist, createPlaylist, addToRecentlyPlayed,
   addToDownloaded, isDownloaded, getPreferences,
+  getReactions, addReaction, type Reaction,
 } from "@/lib/storage"
 import {
   Dialog, DialogContent, DialogDescription,
@@ -303,7 +304,14 @@ function PlayerContent() {
   const [sleepTimeMinutes,   setSleepTimeMinutes]   = useState(0)
   const [sleepTimerActive,   setSleepTimerActive]   = useState(false)
   const [sleepRemaining,     setSleepRemaining]     = useState(0)
+  const [sleepMode,          setSleepMode]          = useState<"timer" | "song">("timer")
   const [showPartyDlg,       setShowPartyDlg]       = useState(false)
+
+  // Reactions timeline
+  const [reactions,          setReactions]          = useState<Reaction[]>([])
+  const [floatingReactions,  setFloatingReactions]  = useState<{ id: number; emoji: string; x: number }[]>([])
+  const floatingIdRef = useRef(0)
+  const REACTION_EMOJIS = ["🔥","❤️","😍","🎵","💃","🙌","😭","✨"]
 
   const {
     currentSong, isPlaying, currentTime, duration,
@@ -313,6 +321,8 @@ function PlayerContent() {
     queue, queueIndex, isLoading,
     removeFromQueue, moveInQueue,
     partyId, isPartyHost, startParty, stopParty,
+    queueExhausted, suggestions, dismissSuggestions, playFromSuggestions,
+    crossfadeSecs, setCrossfadeSecs,
   } = useAudio()
 
   const songId      = params.get("id")           || ""
@@ -411,15 +421,60 @@ function PlayerContent() {
     return () => clearInterval(interval)
   }, [sleepTimerActive, sleepRemaining, isPlaying, stopSong])
 
-  const startSleepTimer = (mins: number) => {
-    if (mins === 0) {
+  // Sleep-on-song-end: stop when current song finishes
+  useEffect(() => {
+    if (sleepMode === "song" && sleepTimerActive && !isPlaying && currentTime > 0 && duration > 0) {
+      const remaining = duration - currentTime
+      if (remaining < 1) {
+        stopSong()
+        setSleepTimerActive(false)
+      }
+    }
+  }, [isPlaying, currentTime, duration, sleepMode, sleepTimerActive, stopSong])
+
+  // Load reactions for current song
+  useEffect(() => {
+    const id = currentSong?.id || currentSong?.videoId
+    if (!id) { setReactions([]); return }
+    setReactions(getReactions(id))
+  }, [currentSong])
+
+  // Fire stored reactions as floating emojis at the right timestamp
+  useEffect(() => {
+    const id = currentSong?.id || currentSong?.videoId
+    if (!id || !reactions.length) return
+    const currentSec = Math.floor(currentTime)
+    const matching = reactions.filter(r => Math.abs(r.timestamp - currentSec) < 1)
+    if (matching.length > 0) {
+      matching.forEach(r => fireFloating(r.emoji))
+    }
+  }, [Math.floor(currentTime)]) // eslint-disable-line
+
+  const startSleepTimer = (mins: number, mode: "timer" | "song" = "timer") => {
+    if (mins === 0 && mode === "timer") {
       setSleepTimerActive(false)
       setSleepRemaining(0)
     } else {
-      setSleepRemaining(mins * 60)
+      setSleepMode(mode)
+      if (mode === "timer") setSleepRemaining(mins * 60)
       setSleepTimerActive(true)
     }
     setShowSleepTimerDlg(false)
+  }
+
+  const fireFloating = (emoji: string) => {
+    const id = ++floatingIdRef.current
+    const x  = 10 + Math.random() * 80   // % from left
+    setFloatingReactions(prev => [...prev, { id, emoji, x }])
+    setTimeout(() => setFloatingReactions(prev => prev.filter(f => f.id !== id)), 2500)
+  }
+
+  const tapReaction = (emoji: string) => {
+    const songId = currentSong?.id || currentSong?.videoId
+    if (!songId) return
+    addReaction(songId, emoji, currentTime)
+    setReactions(getReactions(songId))
+    fireFloating(emoji)
   }
 
   // Fetch SponsorBlock highlight (POI) when video changes
@@ -763,6 +818,52 @@ function PlayerContent() {
               <h1 className="text-xl font-bold truncate px-2">{displayTitle}</h1>
               <p className="text-sm text-muted-foreground truncate mt-0.5">{displayArtist}</p>
             </div>
+
+            {/* ── Floating Reaction Emojis ── */}
+            {floatingReactions.length > 0 && (
+              <div className="absolute inset-0 pointer-events-none z-50 overflow-hidden">
+                {floatingReactions.map(f => (
+                  <div
+                    key={f.id}
+                    className="absolute text-2xl animate-bounce"
+                    style={{
+                      left:      `${f.x}%`,
+                      bottom:    "30%",
+                      animation: "floatUp 2.5s ease-out forwards",
+                    }}
+                  >
+                    {f.emoji}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* ── Reaction Emoji Bar ──
+                Tap bar is hidden when reactionsEnabled=false in Settings.
+                Stored reactions still fire as floating emojis regardless — they were
+                placed when the feature was on and should still play back. */}
+            {currentSong && !isPodcast && getPreferences().reactionsEnabled && (
+              <div className="px-4 mb-3 flex-shrink-0">
+                <div className="flex items-center justify-between bg-white/5 backdrop-blur-sm rounded-2xl px-3 py-2 border border-white/8">
+                  <div className="flex gap-1.5">
+                    {REACTION_EMOJIS.map(emoji => (
+                      <button
+                        key={emoji}
+                        onClick={() => tapReaction(emoji)}
+                        className="text-lg w-8 h-8 flex items-center justify-center rounded-xl hover:bg-white/15 active:scale-125 transition-all"
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                  {reactions.length > 0 && (
+                    <span className="text-[10px] text-muted-foreground/60 flex-shrink-0 ml-1">
+                      {reactions.length}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Action buttons — podcast mode hides lyrics & download */}
             <div className="flex items-center justify-center gap-4 px-6 mb-2 flex-shrink-0">
@@ -1354,6 +1455,8 @@ function PlayerContent() {
                   title={currentSong?.title || title || "Unknown"}
                   artist={currentSong?.artist || artist || "Unknown"}
                   thumbnail={currentSong?.thumbnail || thumbnail || ""}
+                  lyrics={lyrics}
+                  currentLyricIndex={currentLyricIndex}
                 />
               </div>
             )}
@@ -1460,6 +1563,8 @@ function PlayerContent() {
                     title={currentSong?.title || title || "Unknown"}
                     artist={currentSong?.artist || artist || "Unknown"}
                     thumbnail={currentSong?.thumbnail || thumbnail || ""}
+                    lyrics={lyrics}
+                    currentLyricIndex={currentLyricIndex}
                   />
                 </div>
               )}
@@ -1514,6 +1619,56 @@ function PlayerContent() {
         </DialogContent>
       </Dialog>
 
+      {/* ── Smart Queue Suggestion Card ── */}
+      {queueExhausted && suggestions.length > 0 && (
+        <div className="fixed bottom-28 left-0 right-0 z-50 px-4 pointer-events-none">
+          <div className="max-w-md mx-auto bg-card/95 backdrop-blur-xl border border-border/40 rounded-3xl shadow-2xl overflow-hidden pointer-events-auto">
+            <div className="flex items-center gap-2.5 px-4 pt-4 pb-2">
+              <Sparkles className="w-4 h-4 text-primary flex-shrink-0" />
+              <p className="font-semibold text-sm flex-1">What's next?</p>
+              <button onClick={dismissSuggestions} className="text-muted-foreground/60 hover:text-foreground text-xs px-2 py-1 rounded-lg hover:bg-muted/40 transition-colors">
+                Dismiss
+              </button>
+            </div>
+            <div className="space-y-0 pb-3">
+              {suggestions.slice(0, 4).map((song, i) => (
+                <div
+                  key={song.id}
+                  onClick={() => playSong(song)}
+                  className="group flex items-center gap-3 px-4 py-2.5 hover:bg-primary/5 transition-colors cursor-pointer"
+                >
+                  <span className="text-xs text-muted-foreground/40 w-4 text-center flex-shrink-0">{i + 1}</span>
+                  <div className="relative w-9 h-9 rounded-lg overflow-hidden bg-muted flex-shrink-0">
+                    <ImageWithFallback
+                      src={song.thumbnail} alt={song.title}
+                      className="w-full h-full object-cover"
+                      fallback={<div className="w-full h-full flex items-center justify-center bg-muted"><Music className="w-3 h-3 text-muted-foreground" /></div>}
+                    />
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 flex items-center justify-center transition-all">
+                      <Play className="w-3 h-3 text-white opacity-0 group-hover:opacity-100 fill-white" />
+                    </div>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold truncate">{song.title}</p>
+                    <p className="text-xs text-muted-foreground truncate">{song.artist}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="px-4 pb-4">
+              <Button
+                size="sm"
+                className="w-full rounded-2xl h-9 text-sm gap-2"
+                onClick={() => playFromSuggestions(suggestions)}
+              >
+                <Play className="w-3.5 h-3.5 fill-current" />
+                Play All Suggestions
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Sleep Timer Dialog ── */}
       <Dialog open={showSleepTimerDlg} onOpenChange={setShowSleepTimerDlg}>
         <DialogContent className="max-w-xs rounded-3xl">
@@ -1523,34 +1678,66 @@ function PlayerContent() {
               Sleep Timer
             </DialogTitle>
             <DialogDescription>
-              Stop playback automatically after:
+              Stop playback automatically.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid grid-cols-2 gap-2 py-4">
-            {[5, 15, 30, 45, 60, 90].map(mins => (
+
+          {/* End of song mode */}
+          <button
+            onClick={() => startSleepTimer(0, "song")}
+            className={[
+              "w-full flex items-center gap-3 px-4 py-3 rounded-2xl border transition-all text-left",
+              sleepTimerActive && sleepMode === "song"
+                ? "bg-primary/10 border-primary/30 text-primary"
+                : "border-border/40 hover:bg-card/60",
+            ].join(" ")}
+          >
+            <Music className="w-4 h-4 flex-shrink-0" />
+            <div>
+              <p className="font-semibold text-sm">End of current song</p>
+              <p className="text-xs text-muted-foreground">Stop when this song finishes</p>
+            </div>
+            {sleepTimerActive && sleepMode === "song" && (
+              <Check className="w-4 h-4 ml-auto text-primary" />
+            )}
+          </button>
+
+          <div className="grid grid-cols-3 gap-2 py-1">
+            {[5, 10, 15, 20, 30, 45, 60, 90, 120].map(mins => (
               <Button
                 key={mins}
-                variant="outline"
-                className="rounded-xl h-12"
-                onClick={() => startSleepTimer(mins)}
+                variant={sleepTimerActive && sleepMode === "timer" && sleepRemaining === mins * 60 ? "default" : "outline"}
+                className="rounded-xl h-11 text-sm"
+                onClick={() => startSleepTimer(mins, "timer")}
               >
-                {mins} min
+                {mins < 60 ? `${mins}m` : `${mins/60}h`}
               </Button>
             ))}
-            <Button
-              variant="destructive"
-              className="col-span-2 rounded-xl h-12 mt-2"
-              onClick={() => startSleepTimer(0)}
-              disabled={!sleepTimerActive}
-            >
-              Turn off timer
-            </Button>
           </div>
+
           {sleepTimerActive && (
-            <p className="text-center text-xs text-primary font-medium">
-              Time remaining: {Math.floor(sleepRemaining / 60)}:{(sleepRemaining % 60).toString().padStart(2, "0")}
-            </p>
+            <div className="text-center rounded-2xl bg-primary/8 border border-primary/20 py-3 px-4">
+              {sleepMode === "song" ? (
+                <p className="text-sm text-primary font-medium">⏸ Stops after current song</p>
+              ) : (
+                <>
+                  <p className="text-xs text-muted-foreground mb-1">Stopping in</p>
+                  <p className="text-2xl font-bold text-primary tabular-nums">
+                    {Math.floor(sleepRemaining / 60)}:{(sleepRemaining % 60).toString().padStart(2, "0")}
+                  </p>
+                </>
+              )}
+            </div>
           )}
+
+          <Button
+            variant="destructive"
+            className="w-full rounded-2xl h-11 mt-1"
+            onClick={() => startSleepTimer(0)}
+            disabled={!sleepTimerActive}
+          >
+            Turn Off Timer
+          </Button>
         </DialogContent>
       </Dialog>
 

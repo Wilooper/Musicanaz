@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import {
   Heart, Download, ListMusic, Trash2,
   Play, Shuffle, ChevronLeft, Music, Plus,
-  Upload, Share,
+  Upload, Share, Users, Link2, Copy, Check,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -21,6 +21,8 @@ import {
   getLikedSongs, getDownloadedSongs, getPlaylists,
   deletePlaylist, removeSongFromPlaylist,
   createPlaylist, exportPlaylist, importPlaylist,
+  getCollabRefs, saveCollabRef, removeCollabRef, getGuestId, getPartyUsername,
+  type CollabRef,
 } from "@/lib/storage"
 import { useAudio } from "@/lib/audio-context"
 import type { Song } from "@/lib/types"
@@ -37,6 +39,11 @@ export default function LibraryPage() {
   const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null)
   const [showNewDlg,       setShowNewDlg]       = useState(false)
   const [newName,          setNewName]          = useState("")
+  const [collabRefs,       setCollabRefs]       = useState<CollabRef[]>([])
+  const [collabName,       setCollabName]       = useState("")
+  const [collabLoading,    setCollabLoading]    = useState(false)
+  const [joinCode,         setJoinCode]         = useState("")
+  const [copiedId,         setCopiedId]         = useState<string | null>(null)
 
   useEffect(() => { loadData() }, [])
 
@@ -44,6 +51,7 @@ export default function LibraryPage() {
     setLikedSongs(getLikedSongs())
     setDownloadedSongs(getDownloadedSongs())
     setPlaylists(getPlaylists())
+    setCollabRefs(getCollabRefs())
   }
 
   const handleDeletePlaylist = (playlistId: string) => {
@@ -132,6 +140,9 @@ export default function LibraryPage() {
             </TabsTrigger>
             <TabsTrigger value="downloads" className="rounded-full px-4 py-1.5 text-sm flex-shrink-0 gap-1.5">
               <Download className="w-3.5 h-3.5" />Downloads
+            </TabsTrigger>
+            <TabsTrigger value="collab" className="rounded-full px-4 py-1.5 text-sm flex-shrink-0 gap-1.5">
+              <Users className="w-3.5 h-3.5" />Collab
             </TabsTrigger>
           </TabsList>
 
@@ -368,6 +379,134 @@ export default function LibraryPage() {
                 ? downloadedSongs.map((song, idx) => <SongCard key={`dl-${song.id}-${idx}`} song={song as Song} />)
                 : <EmptyState icon={Download} text="No downloaded songs yet" />
               }
+            </div>
+          </TabsContent>
+
+          {/* ── Collab Playlists ── */}
+          <TabsContent value="collab">
+            <div className="space-y-4">
+              {/* Create new collab */}
+              <div className="rounded-2xl bg-card/40 border border-border/30 p-4 space-y-3">
+                <p className="text-sm font-semibold flex items-center gap-2">
+                  <Plus className="w-4 h-4 text-primary" /> Start a Collab Playlist
+                </p>
+                <p className="text-xs text-muted-foreground">Create a shared playlist that anyone with the link can add songs to.</p>
+                <div className="flex gap-2">
+                  <input
+                    value={collabName}
+                    onChange={e => setCollabName(e.target.value)}
+                    placeholder="Playlist name…"
+                    className="flex-1 h-10 px-3 rounded-xl bg-background/60 border border-border/40 text-sm focus:outline-none focus:border-primary/50"
+                  />
+                  <Button
+                    onClick={async () => {
+                      if (!collabName.trim()) return
+                      setCollabLoading(true)
+                      try {
+                        const userId   = getGuestId()
+                        const username = getPartyUsername()
+                        const res  = await fetch("/api/collab", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ action: "create", name: collabName.trim(), ownerId: userId }),
+                        })
+                        const data = await res.json()
+                        if (data.id) {
+                          saveCollabRef({ id: data.id, name: collabName.trim(), joined: Date.now(), isOwner: true })
+                          setCollabRefs(getCollabRefs())
+                          setCollabName("")
+                          router.push(`/collab/${data.id}`)
+                        }
+                      } catch {}
+                      finally { setCollabLoading(false) }
+                    }}
+                    disabled={collabLoading || !collabName.trim()}
+                    className="rounded-xl px-4 h-10"
+                  >
+                    {collabLoading ? <span className="animate-spin">⏳</span> : "Create"}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Join via link */}
+              <div className="rounded-2xl bg-card/40 border border-border/30 p-4 space-y-3">
+                <p className="text-sm font-semibold flex items-center gap-2">
+                  <Link2 className="w-4 h-4 text-primary" /> Join a Collab Playlist
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    value={joinCode}
+                    onChange={e => setJoinCode(e.target.value)}
+                    placeholder="Paste playlist ID or full link…"
+                    className="flex-1 h-10 px-3 rounded-xl bg-background/60 border border-border/40 text-sm focus:outline-none focus:border-primary/50"
+                  />
+                  <Button
+                    onClick={() => {
+                      const raw = joinCode.trim()
+                      const id  = raw.includes("/") ? raw.split("/").pop() : raw
+                      if (id) { setJoinCode(""); router.push(`/collab/${id}`) }
+                    }}
+                    disabled={!joinCode.trim()}
+                    variant="outline"
+                    className="rounded-xl px-4 h-10"
+                  >
+                    Join
+                  </Button>
+                </div>
+              </div>
+
+              {/* My collab playlists */}
+              {collabRefs.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Recent Collab Playlists</p>
+                  {collabRefs.map(ref => (
+                    <div
+                      key={ref.id}
+                      className="group flex items-center gap-3 px-4 py-3 rounded-2xl bg-card/40 border border-border/30 hover:border-primary/30 hover:bg-card/60 transition-all cursor-pointer"
+                      onClick={() => router.push(`/collab/${ref.id}`)}
+                    >
+                      <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+                        <Users className="w-5 h-5 text-primary" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-sm truncate">{ref.name}</p>
+                        <p className="text-xs text-muted-foreground">{ref.isOwner ? "Owner" : "Collaborator"}</p>
+                      </div>
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          onClick={e => {
+                            e.stopPropagation()
+                            navigator.clipboard.writeText(`${window.location.origin}/collab/${ref.id}`)
+                            setCopiedId(ref.id)
+                            setTimeout(() => setCopiedId(null), 2000)
+                          }}
+                          className="p-1.5 rounded-lg hover:bg-primary/10 transition-colors"
+                        >
+                          {copiedId === ref.id ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5 text-muted-foreground" />}
+                        </button>
+                        <button
+                          onClick={e => {
+                            e.stopPropagation()
+                            removeCollabRef(ref.id)
+                            setCollabRefs(getCollabRefs())
+                          }}
+                          className="p-1.5 rounded-lg hover:bg-destructive/10 hover:text-destructive transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-muted-foreground" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {collabRefs.length === 0 && (
+                <div className="flex flex-col items-center py-12 text-center">
+                  <Users className="w-10 h-10 text-muted-foreground/20 mb-3" />
+                  <p className="text-sm text-muted-foreground">No collab playlists yet</p>
+                  <p className="text-xs text-muted-foreground/60">Create one above or join with a link</p>
+                </div>
+              )}
             </div>
           </TabsContent>
 

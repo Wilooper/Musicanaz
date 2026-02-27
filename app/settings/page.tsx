@@ -1,23 +1,26 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import {
   ChevronLeft, Globe, Check, Music, Palette,
   Languages, Info, RotateCcw, ChevronRight,
   Key, Eye, EyeOff, Type, Sparkles, X as XIcon,
-  Clock, BarChart2, Trash2, Calendar, User,
+  Clock, BarChart2, Trash2, Calendar, User, Zap,
+  Download, Upload, AlertCircle, CheckCircle2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import ImageWithFallback from "@/components/image-with-fallback"
 import { Input } from "@/components/ui/input"
+import { Slider } from "@/components/ui/slider"
+import { useAudio } from "@/lib/audio-context"
 import {
   getPreferences, savePreferences, type UserPreferences,
   getTodayListenSeconds, getMonthListenSeconds, getAllTimeListenSeconds,
   getWeekListenData, fmtListenTime, clearListenStats,
   getPartyUsername, savePartyUsername,
   getHeatmapData, type HeatmapDay,
-  getSongHistory,
+  getSongHistory, exportAllData, importAllData,
 } from "@/lib/storage"
 
 const COUNTRIES = [
@@ -61,6 +64,7 @@ const TARGET_LANGUAGES = [
 
 export default function SettingsPage() {
   const router = useRouter()
+  const { crossfadeSecs, setCrossfadeSecs } = useAudio()
   const [prefs, setPrefs] = useState<UserPreferences>({
     country: "ZZ", language: "en", theme: "system",
     groqApiKey: "", transliterateEnabled: true,
@@ -84,6 +88,13 @@ export default function SettingsPage() {
   // Party username
   const [partyName,      setPartyName]      = useState("")
   const [partyNameSaved, setPartyNameSaved] = useState(false)
+
+  // Backup / Restore
+  const importRef        = useRef<HTMLInputElement>(null)
+  const [importStatus,   setImportStatus]   = useState<"idle"|"ok"|"fail">("idle")
+  const [importMsg,      setImportMsg]      = useState("")
+  const [importMode,     setImportMode]     = useState<"replace"|"merge">("replace")
+  const [importing,      setImporting]      = useState(false)
 
   useEffect(() => {
     const p = getPreferences()
@@ -148,6 +159,55 @@ export default function SettingsPage() {
       </div>
 
       <div className="container max-w-2xl mx-auto px-4 py-8 pb-36 space-y-8">
+
+        {/* ── Playback Settings ─── */}
+        <section>
+          <SectionHeader
+            icon={<Zap className="w-5 h-5 text-primary" />}
+            title="Playback"
+            desc="Audio engine settings for crossfade and transitions."
+          />
+          <div className="rounded-2xl bg-card/40 border border-border/30 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <p className="text-sm font-semibold">Crossfade</p>
+                <p className="text-xs text-muted-foreground">Smooth fade between songs</p>
+              </div>
+              <span className={`text-sm font-bold tabular-nums px-2.5 py-1 rounded-full ${crossfadeSecs > 0 ? "bg-primary/15 text-primary" : "bg-muted/50 text-muted-foreground"}`}>
+                {crossfadeSecs === 0 ? "Off" : `${crossfadeSecs}s`}
+              </span>
+            </div>
+            <Slider
+              value={[crossfadeSecs]}
+              onValueChange={([v]) => setCrossfadeSecs(v)}
+              min={0} max={8} step={2}
+              className="w-full"
+            />
+            <div className="flex justify-between text-[10px] text-muted-foreground/50 mt-1.5 px-1">
+              <span>Off</span><span>2s</span><span>4s</span><span>6s</span><span>8s</span>
+            </div>
+          </div>
+
+          {/* Emoji Reactions toggle */}
+          <div className="rounded-2xl bg-card/40 border border-border/30 px-4 py-3.5 flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0 text-base">
+              🔥
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Song Reactions</p>
+              <p className="text-xs text-muted-foreground">Show emoji bar in the player to stamp reactions at timestamps</p>
+            </div>
+            <button
+              onClick={() => {
+                const next = savePreferences({ reactionsEnabled: !prefs.reactionsEnabled })
+                setPrefs(next); setSaved(true); setTimeout(() => setSaved(false), 1800)
+              }}
+              className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${prefs.reactionsEnabled ? "bg-primary" : "bg-muted"}`}
+            >
+              <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${prefs.reactionsEnabled ? "translate-x-5" : "translate-x-0.5"}`} />
+            </button>
+          </div>
+        </section>
 
         {/* ── Content Country ─── */}
         <section>
@@ -536,6 +596,133 @@ export default function SettingsPage() {
 
         {/* ── About ─── */}
         <section>
+          <SectionHeader
+            icon={<Download className="w-5 h-5 text-primary" />}
+            title="Backup & Restore"
+            desc="Export all your data as a JSON file, or import a backup to restore liked songs, playlists, history, preferences and more."
+          />
+
+          {/* Export */}
+          <div className="rounded-2xl bg-card/40 border border-border/30 p-4 mb-3">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="w-9 h-9 rounded-xl bg-green-500/10 flex items-center justify-center flex-shrink-0">
+                <Download className="w-4 h-4 text-green-400" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold">Export Data</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Downloads a <code className="bg-muted/60 rounded px-1 text-[11px]">.json</code> backup of all your liked songs, playlists, history, preferences, reactions and collab references.
+                </p>
+              </div>
+            </div>
+            <Button
+              onClick={() => exportAllData()}
+              className="w-full rounded-2xl h-11 gap-2 bg-green-600 hover:bg-green-500 text-white"
+            >
+              <Download className="w-4 h-4" />
+              Download Backup
+            </Button>
+          </div>
+
+          {/* Import */}
+          <div className="rounded-2xl bg-card/40 border border-border/30 p-4">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="w-9 h-9 rounded-xl bg-blue-500/10 flex items-center justify-center flex-shrink-0">
+                <Upload className="w-4 h-4 text-blue-400" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold">Import Data</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Restore from a previously exported backup file.
+                </p>
+              </div>
+            </div>
+
+            {/* Mode selector */}
+            <div className="flex gap-2 mb-4">
+              {(["replace", "merge"] as const).map(m => (
+                <button
+                  key={m}
+                  onClick={() => setImportMode(m)}
+                  className={[
+                    "flex-1 py-2.5 rounded-xl border text-sm font-medium transition-all",
+                    importMode === m
+                      ? "border-primary/50 bg-primary/10 text-primary"
+                      : "border-border/40 bg-card/30 text-muted-foreground hover:text-foreground",
+                  ].join(" ")}
+                >
+                  {m === "replace" ? "🔄 Replace All" : "➕ Merge"}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground/70 mb-4 px-1">
+              {importMode === "replace"
+                ? "⚠️ Replace mode wipes all current data before restoring. Use when moving to a new device."
+                : "Merge mode adds backup data on top of existing data — existing liked songs & playlists are kept."}
+            </p>
+
+            {/* Status message */}
+            {importStatus !== "idle" && (
+              <div className={[
+                "flex items-center gap-2.5 rounded-xl px-3 py-2.5 mb-3 text-sm",
+                importStatus === "ok"
+                  ? "bg-green-500/10 text-green-400 border border-green-500/20"
+                  : "bg-destructive/10 text-destructive border border-destructive/20",
+              ].join(" ")}>
+                {importStatus === "ok"
+                  ? <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                  : <AlertCircle  className="w-4 h-4 flex-shrink-0" />}
+                <span>{importMsg}</span>
+              </div>
+            )}
+
+            {/* Hidden file input */}
+            <input
+              ref={importRef}
+              type="file"
+              accept=".json,application/json"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0]
+                if (!file) return
+                setImporting(true)
+                setImportStatus("idle")
+                try {
+                  const text   = await file.text()
+                  const result = importAllData(text, importMode)
+                  if (result.ok) {
+                    setImportStatus("ok")
+                    setImportMsg(`Restored ${result.keysRestored} data group${result.keysRestored !== 1 ? "s" : ""}. Refresh the app to see changes.`)
+                  } else {
+                    setImportStatus("fail")
+                    setImportMsg(result.error || "Import failed")
+                  }
+                } catch (err: any) {
+                  setImportStatus("fail")
+                  setImportMsg(err?.message || "Could not read file")
+                } finally {
+                  setImporting(false)
+                  // Reset so same file can be picked again
+                  if (importRef.current) importRef.current.value = ""
+                }
+              }}
+            />
+
+            <Button
+              onClick={() => importRef.current?.click()}
+              disabled={importing}
+              variant="outline"
+              className="w-full rounded-2xl h-11 gap-2 border-blue-500/30 text-blue-400 hover:bg-blue-500/10"
+            >
+              {importing
+                ? <><span className="animate-spin">⏳</span> Importing…</>
+                : <><Upload className="w-4 h-4" />Choose Backup File</>
+              }
+            </Button>
+          </div>
+        </section>
+
+                <section>
           <SectionHeader
             icon={<Info className="w-5 h-5 text-primary" />}
             title="About"

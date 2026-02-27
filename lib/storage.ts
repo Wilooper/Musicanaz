@@ -325,7 +325,9 @@ export interface UserPreferences {
   groqApiKey:           string       // user-supplied Groq API key
   transliterateEnabled: boolean      // show transliteration button in lyrics
   translationEnabled:   boolean      // show translation button in lyrics
-  transliterateLanguage: string      // target language for both, e.g. "English", "Hindi"
+  transliterateLanguage: string      // target language for both
+  crossfadeSecs:         number       // 0 = off, 2/4/6/8 = crossfade seconds
+  reactionsEnabled:      boolean      // show emoji reaction bar in player
 }
 
 const DEFAULT_PREFS: UserPreferences = {
@@ -336,6 +338,8 @@ const DEFAULT_PREFS: UserPreferences = {
   transliterateEnabled:  true,
   translationEnabled:    true,
   transliterateLanguage: "English",
+  crossfadeSecs:         0,
+  reactionsEnabled:      true,
 }
 
 export function getPreferences(): UserPreferences {
@@ -554,4 +558,191 @@ export function getHeatmapData(): HeatmapDay[] {
     result.push({ date: key, seconds: secs, level })
   }
   return result
+}
+
+// ─── Reactions timeline ───────────────────────────────────────
+const REACTIONS_KEY = "musicana_reactions"
+
+export interface Reaction {
+  emoji:     string
+  timestamp: number   // seconds in song
+  addedAt:   number   // unix ms
+}
+
+export function getReactions(songId: string): Reaction[] {
+  if (typeof window === "undefined") return []
+  try {
+    const all = JSON.parse(localStorage.getItem(REACTIONS_KEY) || "{}")
+    return (all[songId] || []) as Reaction[]
+  } catch { return [] }
+}
+
+export function addReaction(songId: string, emoji: string, timestamp: number): void {
+  if (typeof window === "undefined") return
+  try {
+    const all = JSON.parse(localStorage.getItem(REACTIONS_KEY) || "{}")
+    if (!all[songId]) all[songId] = []
+    all[songId].push({ emoji, timestamp: Math.floor(timestamp), addedAt: Date.now() })
+    if (all[songId].length > 200) all[songId] = all[songId].slice(-200)
+    localStorage.setItem(REACTIONS_KEY, JSON.stringify(all))
+  } catch {}
+}
+
+export function clearReactions(songId: string): void {
+  if (typeof window === "undefined") return
+  try {
+    const all = JSON.parse(localStorage.getItem(REACTIONS_KEY) || "{}")
+    delete all[songId]
+    localStorage.setItem(REACTIONS_KEY, JSON.stringify(all))
+  } catch {}
+}
+
+// ─── Collab Playlist refs (local bookmarks) ───────────────────
+const COLLAB_KEY = "musicana_collab_refs"
+
+export interface CollabRef {
+  id:       string
+  name:     string
+  joined:   number   // unix ms
+  isOwner:  boolean
+}
+
+export function getCollabRefs(): CollabRef[] {
+  if (typeof window === "undefined") return []
+  try {
+    const s = localStorage.getItem(COLLAB_KEY)
+    return s ? JSON.parse(s) : []
+  } catch { return [] }
+}
+
+export function saveCollabRef(ref: CollabRef): void {
+  if (typeof window === "undefined") return
+  try {
+    const refs = getCollabRefs().filter(r => r.id !== ref.id)
+    localStorage.setItem(COLLAB_KEY, JSON.stringify([ref, ...refs].slice(0, 20)))
+  } catch {}
+}
+
+export function removeCollabRef(id: string): void {
+  if (typeof window === "undefined") return
+  try {
+    localStorage.setItem(COLLAB_KEY, JSON.stringify(getCollabRefs().filter(r => r.id !== id)))
+  } catch {}
+}
+
+// ─── All-time top songs (no time window cutoff) ───────────────
+export function getAllTimeTopSongs(limit = 10): TopSong[] {
+  const history = getSongHistory()
+  const counts  = new Map<string, { song: Song; plays: number }>()
+  for (const e of history) {
+    const id = e.song.id
+    if (!counts.has(id)) counts.set(id, { song: e.song, plays: 0 })
+    counts.get(id)!.plays++
+  }
+  return [...counts.values()]
+    .sort((a, b) => b.plays - a.plays)
+    .slice(0, limit)
+}
+
+// ─── Full data export / import ───────────────────────────────
+const ALL_KEYS = [
+  "lyrica_recently_played",
+  "lyrica_liked_songs",
+  "lyrica_playlists",
+  "lyrica_downloaded_songs",
+  "musicana_preferences",
+  "musicana_party_username",
+  "musicana_guest_id",
+  "musicana_listen_stats",
+  "musicana_song_history",
+  "musicana_reactions",
+  "musicana_collab_refs",
+]
+
+export interface MusicanaBackup {
+  version:   number
+  exportedAt: number
+  data:       Record<string, any>
+}
+
+export function exportAllData(): void {
+  if (typeof window === "undefined") return
+  try {
+    const data: Record<string, any> = {}
+    for (const key of ALL_KEYS) {
+      const raw = localStorage.getItem(key)
+      if (raw) {
+        try { data[key] = JSON.parse(raw) } catch { data[key] = raw }
+      }
+    }
+    const backup: MusicanaBackup = {
+      version:    1,
+      exportedAt: Date.now(),
+      data,
+    }
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement("a")
+    const date = new Date().toISOString().slice(0, 10)
+    a.href     = url
+    a.download = `musicana-backup-${date}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (e) { console.error("Export failed:", e) }
+}
+
+export function importAllData(
+  json: string,
+  mode: "merge" | "replace" = "replace",
+): { ok: boolean; error?: string; keysRestored: number } {
+  if (typeof window === "undefined") return { ok: false, error: "Not in browser", keysRestored: 0 }
+  try {
+    const backup: MusicanaBackup = JSON.parse(json)
+    if (!backup?.data || typeof backup.data !== "object") {
+      return { ok: false, error: "Invalid backup file format", keysRestored: 0 }
+    }
+    if (backup.version !== 1) {
+      return { ok: false, error: `Unknown backup version: ${backup.version}`, keysRestored: 0 }
+    }
+
+    let keysRestored = 0
+
+    if (mode === "replace") {
+      // Wipe existing keys first
+      for (const key of ALL_KEYS) localStorage.removeItem(key)
+    }
+
+    for (const [key, value] of Object.entries(backup.data)) {
+      if (!ALL_KEYS.includes(key)) continue   // only restore known keys
+
+      if (mode === "merge") {
+        // For arrays: merge by id. For objects: spread. Preferences always replace.
+        const existing = localStorage.getItem(key)
+        if (existing && key !== "musicana_preferences") {
+          try {
+            const ex = JSON.parse(existing)
+            if (Array.isArray(ex) && Array.isArray(value)) {
+              const ids = new Set(ex.map((x: any) => x.id || x.videoId))
+              const merged = [...ex, ...(value as any[]).filter((x: any) => !ids.has(x.id || x.videoId))]
+              localStorage.setItem(key, JSON.stringify(merged))
+              keysRestored++
+              continue
+            }
+            if (typeof ex === "object" && typeof value === "object" && !Array.isArray(value)) {
+              localStorage.setItem(key, JSON.stringify({ ...ex, ...(value as object) }))
+              keysRestored++
+              continue
+            }
+          } catch {}
+        }
+      }
+
+      localStorage.setItem(key, JSON.stringify(value))
+      keysRestored++
+    }
+
+    return { ok: true, keysRestored }
+  } catch (e: any) {
+    return { ok: false, error: e?.message || "Parse error", keysRestored: 0 }
+  }
 }

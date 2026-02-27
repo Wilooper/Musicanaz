@@ -5,17 +5,20 @@ import { useRouter } from "next/navigation"
 import {
   ChevronLeft, Clock, Music, Trash2, Play,
   Search, BarChart2, Calendar, Flame, Trophy,
-  TrendingUp, Star,
+  TrendingUp, Star, Sparkles,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import ImageWithFallback from "@/components/image-with-fallback"
 import {
   getSongHistory, getDeduplicatedHistory, clearSongHistory,
-  getTopPlayedSongs, type HistoryEntry, type TopSong,
+  getTopPlayedSongs, getAllTimeTopSongs, type HistoryEntry, type TopSong,
   getTodayListenSeconds, getMonthListenSeconds, getAllTimeListenSeconds,
   getWeekListenData, fmtListenTime, getHeatmapData, type HeatmapDay,
 } from "@/lib/storage"
 import { useAudio } from "@/lib/audio-context"
+import dynamic from "next/dynamic"
+
+const WrappedCard = dynamic(() => import("@/components/wrapped-card"), { ssr: false })
 
 /* ─── helpers ────────────────────────────────────────────── */
 function timeAgo(ms: number): string {
@@ -239,6 +242,8 @@ export default function HistoryPage() {
 
   const [query,      setQuery]      = useState("")
   const [activeTab,  setActiveTab]  = useState<"stats" | "top" | "history">("stats")
+  const [showWrapped,setShowWrapped]= useState(false)
+  const [topAllTime, setTopAllTime] = useState<TopSong[]>([])
 
   // Stats
   const [stats, setStats] = useState({ today: 0, month: 0, allTime: 0 })
@@ -264,6 +269,7 @@ export default function HistoryPage() {
     setTopDay(getTopPlayedSongs("day",   5))
     setTopWeek(getTopPlayedSongs("week",  5))
     setTopMonth(getTopPlayedSongs("month", 5))
+    setTopAllTime(getAllTimeTopSongs(5))
     setHistory(getDeduplicatedHistory())
   }, [])
 
@@ -287,6 +293,7 @@ export default function HistoryPage() {
   const hasAnyTop = topDay.length || topWeek.length || topMonth.length
 
   return (
+    <>
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-accent/10">
 
       {/* ── Sticky Header ── */}
@@ -299,15 +306,24 @@ export default function HistoryPage() {
             <Clock className="w-5 h-5 text-primary" />
             <span className="font-bold text-lg">History</span>
           </div>
-          {history.length > 0 && (
+          <div className="flex items-center gap-2">
             <button
-              onClick={handleClear}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-destructive transition-colors px-2 py-1"
+              onClick={() => setShowWrapped(true)}
+              className="flex items-center gap-1.5 text-xs font-semibold bg-primary/15 hover:bg-primary/25 text-primary transition-colors px-3 py-1.5 rounded-full"
             >
-              <Trash2 className="w-3.5 h-3.5" />
-              Clear
+              <Sparkles className="w-3.5 h-3.5" />
+              Wrapped
             </button>
-          )}
+            {history.length > 0 && (
+              <button
+                onClick={handleClear}
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-destructive transition-colors px-2 py-1"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Clear
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Tab bar */}
@@ -398,6 +414,13 @@ export default function HistoryPage() {
           <>
             {hasAnyTop ? (
               <>
+                <TopSongsSection
+                  title="⭐ All-Time Favourites"
+                  icon={<Star className="w-4 h-4 text-primary" />}
+                  songs={topAllTime}
+                  onPlay={s => playSong(s)}
+                  iconBg="bg-primary/8"
+                />
                 <TopSongsSection
                   title="🔥 Top of the Day"
                   icon={<Flame className="w-4 h-4 text-orange-400" />}
@@ -497,5 +520,9 @@ export default function HistoryPage() {
 
       </div>
     </div>
+
+    {/* ── Wrapped fullscreen overlay ── */}
+    {showWrapped && <WrappedCard onClose={() => setShowWrapped(false)} />}
+    </>
   )
 }
