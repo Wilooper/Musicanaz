@@ -15,11 +15,12 @@ import { AudioProvider } from "@/lib/audio-context"
 import MiniPlayer from "@/components/mini-player"
 import OfflineBanner from "@/components/offline-banner"
 import "./globals.css"
+import Script from "next/script"
 
 const _geist = Geist({ subsets: ["latin"] })
 const _geistMono = Geist_Mono({ subsets: ["latin"] })
 
-const BASE_URL    = "https://musicana.vercel.app"
+const BASE_URL    = "https://musicanaz.vercel.app"
 const LOGO_URL    = "https://raw.githubusercontent.com/wilooper/Asset/main/logo.png"
 const SITE_NAME   = "MUSICANA"
 const DESCRIPTION =
@@ -128,6 +129,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`font-sans antialiased`}>
+        {/* Android Chrome: hint that media played here is audio, not video.
+            Also prevents the browser from sniffing content-type which can
+            cause the YouTube iframe to be treated as a video player. */}
+        <meta httpEquiv="x-content-type-options" content="nosniff" />
         {/* JSON-LD structured data for Google */}
         <script
           type="application/ld+json"
@@ -207,6 +212,20 @@ export default function RootLayout({
             }`,
           }}
         />
+      
+        {/* ── Google Analytics ── */}
+        <Script
+          src="https://www.googletagmanager.com/gtag/js?id=G-NCNJNYM5J8"
+          strategy="afterInteractive"
+        />
+        <Script id="google-analytics" strategy="afterInteractive">
+          {`
+            window.dataLayer = window.dataLayer || [];
+            function gtag(){dataLayer.push(arguments);}
+            gtag('js', new Date());
+            gtag('config', 'G-NCNJNYM5J8');
+          `}
+        </Script>
       </body>
     </html>
   )

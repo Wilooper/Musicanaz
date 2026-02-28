@@ -18,13 +18,34 @@ import { useRouter } from "next/navigation"
 import { useAudio } from "@/lib/audio-context"
 
 /* ─── helpers ─────────────────────────────────────────── */
-function getBestThumbnail(thumbnails: any): string {
-  if (!thumbnails) return ""
-  if (typeof thumbnails === "string") return thumbnails
-  if (!Array.isArray(thumbnails) || !thumbnails.length) return ""
-  const sorted = [...thumbnails].sort((a, b) => (b?.width || 0) - (a?.width || 0))
+// Quality rank for YouTube thumbnail URLs (higher = better)
+function ytQuality(url: string): number {
+  if (!url) return 0
+  if (url.includes("maxresdefault")) return 7
+  if (url.includes("sddefault"))    return 6
+  if (url.includes("hqdefault"))    return 5
+  if (url.includes("mqdefault"))    return 4
+  if (url.includes("0.jpg") || url.includes("0.webp")) return 3  // numbered wide thumb
+  if (url.includes("default"))      return 2
+  return 1
+}
+
+function getBestThumbnail(thumbnails: any, fallback = ""): string {
+  if (!thumbnails && !fallback) return ""
+  if (typeof thumbnails === "string") return thumbnails || fallback
+  if (!Array.isArray(thumbnails) || !thumbnails.length) return fallback
+  // Sort by explicit width first, then URL quality heuristic
+  const sorted = [...thumbnails].sort((a, b) => {
+    const aw = typeof a === "string" ? 0 : (a?.width || 0)
+    const bw = typeof b === "string" ? 0 : (b?.width || 0)
+    if (bw !== aw) return bw - aw
+    const aUrl = typeof a === "string" ? a : (a?.url || "")
+    const bUrl = typeof b === "string" ? b : (b?.url || "")
+    return ytQuality(bUrl) - ytQuality(aUrl)
+  })
   const t = sorted[0]
-  return typeof t === "string" ? t : t?.url || ""
+  const best = typeof t === "string" ? t : (t?.url || "")
+  return best || fallback
 }
 
 function toArtistStr(artists: any): string {
@@ -40,7 +61,7 @@ function convertToSong(track: any): Song {
     id:        track.videoId || track.id || "",
     title:     track.title  || "Unknown",
     artist:    toArtistStr(track.artists),
-    thumbnail: track.thumbnail || getBestThumbnail(track.thumbnails),
+    thumbnail: getBestThumbnail(track.thumbnails, track.thumbnail),
     type:      "musiva",
     videoId:   track.videoId || "",
     album:     typeof track.album === "string" ? track.album : track.album?.name || "",
@@ -78,7 +99,7 @@ function ShelfSkeleton() {
 const GRID = "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3"
 
 function ArtistCard({ item, onClick }: { item: any; onClick: () => void }) {
-  const thumb = item.thumbnail || getBestThumbnail(item.thumbnails)
+  const thumb = getBestThumbnail(item.thumbnails, item.thumbnail)
   return (
     <div onClick={onClick} className="group flex flex-col items-center text-center cursor-pointer p-3 rounded-2xl bg-card/30 hover:bg-card/60 hover:scale-105 transition-all border border-border/20">
       <div className="w-full aspect-square rounded-full overflow-hidden bg-muted mb-3 ring-2 ring-transparent group-hover:ring-primary transition-all">
@@ -96,7 +117,7 @@ function ArtistCard({ item, onClick }: { item: any; onClick: () => void }) {
 }
 
 function AlbumCard({ item, onClick }: { item: any; onClick: () => void }) {
-  const thumb = item.thumbnail || getBestThumbnail(item.thumbnails)
+  const thumb = getBestThumbnail(item.thumbnails, item.thumbnail)
   return (
     <div onClick={onClick} className="group cursor-pointer bg-card/30 rounded-2xl p-3 hover:bg-card/60 hover:scale-105 transition-all border border-border/20">
       <div className="aspect-square rounded-xl overflow-hidden mb-2 bg-muted">
@@ -114,7 +135,7 @@ function AlbumCard({ item, onClick }: { item: any; onClick: () => void }) {
 }
 
 function PlaylistCard({ item, onClick }: { item: any; onClick: () => void }) {
-  const thumb = item.thumbnail || getBestThumbnail(item.thumbnails)
+  const thumb = getBestThumbnail(item.thumbnails, item.thumbnail)
   return (
     <div onClick={onClick} className="group cursor-pointer bg-card/30 rounded-2xl p-3 hover:bg-card/60 hover:scale-105 transition-all border border-border/20 relative overflow-hidden">
       <div className="aspect-square rounded-xl overflow-hidden mb-2 bg-muted">
@@ -137,7 +158,7 @@ function PlaylistCard({ item, onClick }: { item: any; onClick: () => void }) {
 }
 
 function PodcastCard({ item, onClick }: { item: any; onClick: () => void }) {
-  const thumb = item.thumbnail || getBestThumbnail(item.thumbnails)
+  const thumb = getBestThumbnail(item.thumbnails, item.thumbnail)
   return (
     <div onClick={onClick} className="group cursor-pointer bg-card/30 rounded-2xl p-3 hover:bg-card/60 hover:scale-105 transition-all border border-border/20">
       <div className="aspect-square rounded-xl overflow-hidden mb-2 bg-muted">
@@ -163,7 +184,7 @@ function ChartsArtistsRow({ artists }: { artists: any[] }) {
       <h3 className="text-base font-bold mb-3">Top Artists</h3>
       <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
         {artists.map((a: any, i: number) => {
-          const thumb = a.thumbnail || getBestThumbnail(a.thumbnails)
+          const thumb = getBestThumbnail(a.thumbnails, a.thumbnail)
           return (
             <div
               key={i}

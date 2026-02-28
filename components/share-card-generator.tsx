@@ -1,19 +1,24 @@
 "use client"
 
 import { useRef, useState, useCallback, useEffect } from "react"
-import { Download, Loader2, RefreshCw, Music, Quote } from "lucide-react"
+import { Download, Loader2, RefreshCw, Music, Quote, Languages } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { LyricLine } from "@/lib/types"
 
 interface ShareCardProps {
-  title:             string
-  artist:            string
-  thumbnail:         string
-  lyrics?:           LyricLine[]
+  title:              string
+  artist:             string
+  thumbnail:          string
+  lyrics?:            LyricLine[]
   currentLyricIndex?: number
+  /** AI-transformed lines — same length as lyrics */
+  translatedLines?:   string[] | null
+  /** What kind of transform: "translate" | "transliterate" */
+  translationMode?:   "translate" | "transliterate" | null
 }
 
-type CardStyle = "dark" | "gradient" | "light" | "minimal" | "lyrics"
+type CardStyle   = "dark" | "gradient" | "light" | "minimal" | "lyrics"
+type LyricSource = "original" | "translated"
 
 const STYLES: { id: CardStyle; label: string; emoji: string }[] = [
   { id: "dark",     label: "Dark",     emoji: "🌑" },
@@ -64,7 +69,6 @@ function wrapText(
   return lines.slice(0, maxLines)
 }
 
-/* lyric text wrapping — always returns lines (no slice trick) */
 function wrapLyricLine(
   ctx: CanvasRenderingContext2D,
   text: string,
@@ -122,33 +126,55 @@ function fmtTime(ms: number): string {
 
 /* ─── Component ──────────────────────────────────────────── */
 export default function ShareCardGenerator({
-  title, artist, thumbnail, lyrics = [], currentLyricIndex = -1,
+  title, artist, thumbnail,
+  lyrics = [], currentLyricIndex = -1,
+  translatedLines = null, translationMode = null,
 }: ShareCardProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [style,     setStyle]     = useState<CardStyle>("dark")
-  const [loading,   setLoading]   = useState(false)
-  const [rendered,  setRendered]  = useState(false)
-  const [error,     setError]     = useState("")
+  const [style,        setStyle]        = useState<CardStyle>("dark")
+  const [lyricSource,  setLyricSource]  = useState<LyricSource>("original")
+  const [loading,      setLoading]      = useState(false)
+  const [rendered,     setRendered]     = useState(false)
+  const [error,        setError]        = useState("")
 
-  // Lyrics selection state
-  const hasLyrics    = lyrics.length > 0
+  const hasLyrics     = lyrics.length > 0
+  const hasTranslated = !!(translatedLines && translatedLines.length > 0)
+
   const defaultStart = currentLyricIndex >= 0
     ? Math.max(0, currentLyricIndex - 1)
     : 0
   const [selectedStart, setSelectedStart] = useState(defaultStart)
-  const LINES_PER_CARD = 4  // how many lyric lines to show on card
+  const LINES_PER_CARD = 4
 
-  // Reset selected start when currentLyricIndex changes
+  // When no translated lines available, always force original
+  useEffect(() => {
+    if (!hasTranslated) setLyricSource("original")
+  }, [hasTranslated])
+
   useEffect(() => {
     if (currentLyricIndex >= 0) {
       setSelectedStart(Math.max(0, currentLyricIndex - 1))
     }
   }, [currentLyricIndex])
 
-  // If user picks "lyrics" but no lyrics available, fall back
   const effectiveStyle = (style === "lyrics" && !hasLyrics) ? "dark" : style
 
-  const renderCard = useCallback(async (cardStyle: CardStyle, selStart: number) => {
+  // Label for the translated toggle button
+  const transLabel = translationMode === "translate"
+    ? "Translated"
+    : translationMode === "transliterate"
+    ? "Transliterated"
+    : "Translated"
+
+  // Get text for a lyric line based on selected source
+  const getLineText = (lineIdx: number): string => {
+    if (lyricSource === "translated" && hasTranslated && translatedLines) {
+      return translatedLines[lineIdx] ?? lyrics[lineIdx]?.text ?? ""
+    }
+    return lyrics[lineIdx]?.text ?? ""
+  }
+
+  const renderCard = useCallback(async (cardStyle: CardStyle, selStart: number, source: LyricSource) => {
     const canvas = canvasRef.current
     if (!canvas) return
     setLoading(true)
@@ -165,10 +191,9 @@ export default function ShareCardGenerator({
       const [r, g, b] = albumImg ? sampleColor(albumImg) : [60, 40, 80]
 
       /* ════════════════════════════════════════════════════════
-         LYRICS CARD — completely different layout
+         LYRICS CARD
          ════════════════════════════════════════════════════════ */
       if (cardStyle === "lyrics") {
-        // Rich dark background with subtle blurred album art
         ctx.fillStyle = "#0a0a10"
         ctx.fillRect(0, 0, W, H)
         if (albumImg) {
@@ -178,7 +203,6 @@ export default function ShareCardGenerator({
           ctx.filter = "none"
           ctx.restore()
         }
-        // Dark gradient overlay
         const ov = ctx.createLinearGradient(0, 0, 0, H)
         ov.addColorStop(0, "rgba(10,10,16,0.6)")
         ov.addColorStop(0.4, "rgba(10,10,16,0.3)")
@@ -186,17 +210,14 @@ export default function ShareCardGenerator({
         ctx.fillStyle = ov
         ctx.fillRect(0, 0, W, H)
 
-        // ── Accent left strip ──
         const accentGrad = ctx.createLinearGradient(0, 0, 0, H)
         accentGrad.addColorStop(0, `rgba(${r},${g},${b},0.9)`)
         accentGrad.addColorStop(1, `rgba(${r},${g},${b},0.3)`)
         ctx.fillStyle = accentGrad
         ctx.fillRect(0, 0, 6, H)
 
-        // ── Small album art (top-left) ──
-        const thumbSize = 120
-        const thumbX    = 48
-        const thumbY    = 52
+        // Small album art
+        const thumbSize = 120, thumbX = 48, thumbY = 52
         if (albumImg) {
           ctx.save()
           ctx.shadowColor   = "rgba(0,0,0,0.6)"
@@ -213,8 +234,8 @@ export default function ShareCardGenerator({
           ctx.restore()
         }
 
-        // ── Song info (beside thumbnail) ──
-        const infoX = thumbX + thumbSize + 22
+        // Song info beside thumbnail
+        const infoX    = thumbX + thumbSize + 22
         const infoMaxW = W - infoX - 48
         ctx.textBaseline = "top"
         ctx.textAlign    = "left"
@@ -223,12 +244,27 @@ export default function ShareCardGenerator({
         const titleLines = wrapText(ctx, title || "Unknown", infoMaxW, 2)
         titleLines.forEach((line, i) => ctx.fillText(line, infoX, thumbY + 8 + i * 36))
 
-        ctx.font = `500 20px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
+        ctx.font      = `500 20px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
         ctx.fillStyle = "rgba(255,255,255,0.55)"
         const artistShort = (artist || "Unknown").split(",")[0].trim()
         ctx.fillText(artistShort, infoX, thumbY + 8 + titleLines.length * 36 + 4)
 
-        // ── Divider ──
+        // Translation mode badge (if applicable)
+        if (source === "translated" && hasTranslated) {
+          const badgeLabel = translationMode === "translate" ? "🌐 Translated" : "🔤 Transliterated"
+          ctx.font = `600 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
+          const bw = ctx.measureText(badgeLabel).width + 20
+          const bx = infoX, by = thumbY + 8 + titleLines.length * 36 + 32
+          roundRect(ctx, bx, by, bw, 24, 12)
+          ctx.fillStyle = `rgba(${r},${g},${b},0.4)`
+          ctx.fill()
+          ctx.fillStyle = "rgba(255,255,255,0.85)"
+          ctx.textBaseline = "middle"
+          ctx.fillText(badgeLabel, bx + 10, by + 12)
+          ctx.textBaseline = "top"
+        }
+
+        // Divider
         const divY = thumbY + thumbSize + 40
         ctx.strokeStyle = "rgba(255,255,255,0.08)"
         ctx.lineWidth = 1
@@ -237,54 +273,56 @@ export default function ShareCardGenerator({
         ctx.lineTo(W - 48, divY)
         ctx.stroke()
 
-        // ── QUOTE icon ──
+        // Quote icon
         const quoteY = divY + 28
-        ctx.font = `bold 56px serif`
+        ctx.font      = `bold 56px serif`
         ctx.fillStyle = `rgba(${r},${g},${b},0.45)`
         ctx.fillText("\u201C", 48, quoteY)
 
-        // ── Selected lyric lines ──
-        const lyricLines = lyrics.slice(selStart, selStart + LINES_PER_CARD)
+        // Lyric lines (using source-aware text)
         const lyricStartY = quoteY + 44
         const lyricMaxW   = W - 96
         let   curY        = lyricStartY
 
-        lyricLines.forEach((line, lineIdx) => {
-          const isActive = selStart + lineIdx === currentLyricIndex
-          const wrapped  = wrapLyricLine(ctx, line.text, lyricMaxW)
+        for (let lineIdx = selStart; lineIdx < selStart + LINES_PER_CARD && lineIdx < lyrics.length; lineIdx++) {
+          const line     = lyrics[lineIdx]
+          const isActive = lineIdx === currentLyricIndex
+          const text     = source === "translated" && hasTranslated && translatedLines
+            ? (translatedLines[lineIdx] ?? line.text)
+            : line.text
+          const wrapped  = wrapLyricLine(ctx, text, lyricMaxW)
 
-          // Timestamp pill for the first line of each lyric
+          // Timestamp pill
           const tsText = fmtTime(line.start_time)
           ctx.font = `500 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
           const tsW = ctx.measureText(tsText).width + 16
-          ctx.fillStyle = isActive
-            ? `rgba(${r},${g},${b},0.6)`
-            : "rgba(255,255,255,0.08)"
+          ctx.fillStyle = isActive ? `rgba(${r},${g},${b},0.6)` : "rgba(255,255,255,0.08)"
           roundRect(ctx, W - 48 - tsW, curY - 2, tsW, 22, 11)
           ctx.fill()
-          ctx.fillStyle = isActive ? "#fff" : "rgba(255,255,255,0.35)"
-          ctx.textAlign = "right"
+          ctx.fillStyle  = isActive ? "#fff" : "rgba(255,255,255,0.35)"
+          ctx.textAlign  = "right"
           ctx.fillText(tsText, W - 48 - 8, curY + 1)
-          ctx.textAlign = "left"
+          ctx.textAlign  = "left"
 
           wrapped.forEach((wline, wi) => {
-            ctx.font = isActive
+            ctx.font      = isActive
               ? `bold 32px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
               : `400 28px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
             ctx.fillStyle = isActive ? "#ffffff" : "rgba(255,255,255,0.45)"
+            ctx.textBaseline = "top"
             ctx.fillText(wline, 48, curY + wi * 36)
           })
           curY += wrapped.length * 36 + 20
-        })
+        }
 
         // Closing quote
-        ctx.font = `bold 56px serif`
+        ctx.font      = `bold 56px serif`
         ctx.fillStyle = `rgba(${r},${g},${b},0.45)`
         ctx.textAlign = "left"
         ctx.fillText("\u201D", W - 80, curY + 4)
 
-        // ── Bottom branding ──
-        const brandY = H - 60
+        // Branding
+        const brandY    = H - 60
         const barColors = ["#a78bfa","#818cf8","#6366f1","#8b5cf6"]
         const barHeights = [20, 28, 16, 24]
         barHeights.forEach((bh, i) => {
@@ -301,7 +339,7 @@ export default function ShareCardGenerator({
         ctx.font      = `400 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
         ctx.fillStyle = "rgba(255,255,255,0.25)"
         ctx.textAlign = "right"
-        ctx.fillText("musicana.app", W - 48, brandY + 14)
+        ctx.fillText("musicanaz.vercel.app", W - 48, brandY + 14)
 
         setRendered(true)
         return
@@ -416,11 +454,11 @@ export default function ShareCardGenerator({
     } finally {
       setLoading(false)
     }
-  }, [title, artist, thumbnail, lyrics, currentLyricIndex])
+  }, [title, artist, thumbnail, lyrics, currentLyricIndex, translatedLines, translationMode, hasTranslated])
 
   useEffect(() => {
-    renderCard(effectiveStyle, selectedStart)
-  }, [effectiveStyle, selectedStart, renderCard])
+    renderCard(effectiveStyle, selectedStart, lyricSource)
+  }, [effectiveStyle, selectedStart, lyricSource, renderCard])
 
   const handleSave = async () => {
     const canvas = canvasRef.current
@@ -428,13 +466,13 @@ export default function ShareCardGenerator({
     try {
       canvas.toBlob(async (blob) => {
         if (!blob) return
-        const file = new File([blob], "musicana-share.png", { type: "image/png" })
+        const file = new File([blob], "musicanaz-share.png", { type: "image/png" })
         if (navigator.canShare?.({ files: [file] })) {
           await navigator.share({ files: [file], title, text: `${title} — ${artist}` })
         } else {
           const url = URL.createObjectURL(blob)
           const a = document.createElement("a")
-          a.href = url; a.download = "musicana-share.png"; a.click()
+          a.href = url; a.download = "musicanaz-share.png"; a.click()
           URL.revokeObjectURL(url)
         }
       }, "image/png")
@@ -477,71 +515,116 @@ export default function ShareCardGenerator({
         })}
       </div>
 
-      {/* Lyrics line-picker — only visible in lyrics mode */}
-      {effectiveStyle === "lyrics" && hasLyrics && availableLines > 0 && (
-        <div className="rounded-2xl bg-card/40 border border-border/30 p-3">
-          <div className="flex items-center gap-2 mb-2.5">
-            <Quote className="w-3.5 h-3.5 text-primary flex-shrink-0" />
-            <p className="text-xs font-semibold text-muted-foreground">
-              Select lyric section ({LINES_PER_CARD} lines shown)
-            </p>
-          </div>
+      {/* ── Lyrics mode controls ── */}
+      {effectiveStyle === "lyrics" && hasLyrics && (
 
-          {/* Scrollable lyric lines */}
-          <div className="max-h-40 overflow-y-auto space-y-1 pr-1">
-            {lyrics.slice(0, lyrics.length - LINES_PER_CARD + 1).map((line, i) => {
-              const isSelected = i === selectedStart
-              const isCurrent  = i === currentLyricIndex || (currentLyricIndex >= i && currentLyricIndex < i + LINES_PER_CARD)
-              return (
+        <div className="space-y-2">
+
+          {/* Translation source toggle — only shown when translated lines exist */}
+          {hasTranslated && (
+            <div className="flex items-center gap-2 rounded-2xl bg-card/40 border border-border/30 p-2">
+              <Languages className="w-3.5 h-3.5 text-primary flex-shrink-0 ml-1" />
+              <span className="text-xs text-muted-foreground font-medium flex-shrink-0">Lyrics:</span>
+              <div className="flex gap-1 flex-1">
                 <button
-                  key={line.id}
-                  onClick={() => setSelectedStart(i)}
+                  onClick={() => setLyricSource("original")}
                   className={[
-                    "w-full text-left flex items-center gap-2.5 px-2.5 py-2 rounded-xl transition-all text-xs",
-                    isSelected
-                      ? "bg-primary/15 border border-primary/30 text-foreground"
-                      : "hover:bg-card/60 text-muted-foreground border border-transparent",
+                    "flex-1 py-1.5 rounded-xl text-xs font-semibold transition-all border",
+                    lyricSource === "original"
+                      ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                      : "bg-card/30 text-muted-foreground border-border/20 hover:text-foreground",
                   ].join(" ")}
                 >
-                  {/* Timestamp */}
-                  <span className={[
-                    "font-mono text-[10px] tabular-nums flex-shrink-0 px-1.5 py-0.5 rounded-md",
-                    isCurrent ? "bg-primary/20 text-primary" : "bg-muted/40 text-muted-foreground/60",
-                  ].join(" ")}>
-                    {fmtTime(line.start_time)}
-                  </span>
-                  {/* Line text */}
-                  <span className={`truncate leading-tight ${isSelected ? "font-medium text-foreground" : ""}`}>
-                    {line.text}
-                  </span>
-                  {isCurrent && (
-                    <span className="ml-auto flex-shrink-0 text-[9px] text-primary font-semibold">NOW</span>
-                  )}
+                  Original
                 </button>
-              )
-            })}
-          </div>
-
-          {/* Preview of selected lines */}
-          <div className="mt-2.5 pt-2.5 border-t border-border/20">
-            <p className="text-[10px] text-muted-foreground/50 mb-1.5 font-medium uppercase tracking-wider">
-              Will appear on card:
-            </p>
-            <div className="space-y-0.5">
-              {lyrics.slice(selectedStart, selectedStart + LINES_PER_CARD).map((line, i) => (
-                <p
-                  key={line.id}
-                  className={`text-xs leading-snug truncate ${
-                    selectedStart + i === currentLyricIndex
-                      ? "text-foreground font-semibold"
-                      : "text-muted-foreground/60"
-                  }`}
+                <button
+                  onClick={() => setLyricSource("translated")}
+                  className={[
+                    "flex-1 py-1.5 rounded-xl text-xs font-semibold transition-all border",
+                    lyricSource === "translated"
+                      ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                      : "bg-card/30 text-muted-foreground border-border/20 hover:text-foreground",
+                  ].join(" ")}
                 >
-                  {line.text}
-                </p>
-              ))}
+                  {transLabel}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* Lyric line-picker */}
+          {availableLines > 0 && (
+            <div className="rounded-2xl bg-card/40 border border-border/30 p-3">
+              <div className="flex items-center gap-2 mb-2.5">
+                <Quote className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                <p className="text-xs font-semibold text-muted-foreground">
+                  Select lyric section ({LINES_PER_CARD} lines shown)
+                </p>
+              </div>
+
+              <div className="max-h-40 overflow-y-auto space-y-1 pr-1">
+                {lyrics.slice(0, lyrics.length - LINES_PER_CARD + 1).map((line, i) => {
+                  const isSelected = i === selectedStart
+                  const isCurrent  = i === currentLyricIndex || (currentLyricIndex >= i && currentLyricIndex < i + LINES_PER_CARD)
+                  // Display text uses selected source
+                  const displayText = lyricSource === "translated" && hasTranslated && translatedLines
+                    ? (translatedLines[i] ?? line.text)
+                    : line.text
+                  return (
+                    <button
+                      key={line.id}
+                      onClick={() => setSelectedStart(i)}
+                      className={[
+                        "w-full text-left flex items-center gap-2.5 px-2.5 py-2 rounded-xl transition-all text-xs",
+                        isSelected
+                          ? "bg-primary/15 border border-primary/30 text-foreground"
+                          : "hover:bg-card/60 text-muted-foreground border border-transparent",
+                      ].join(" ")}
+                    >
+                      <span className={[
+                        "font-mono text-[10px] tabular-nums flex-shrink-0 px-1.5 py-0.5 rounded-md",
+                        isCurrent ? "bg-primary/20 text-primary" : "bg-muted/40 text-muted-foreground/60",
+                      ].join(" ")}>
+                        {fmtTime(line.start_time)}
+                      </span>
+                      <span className={`truncate leading-tight ${isSelected ? "font-medium text-foreground" : ""}`}>
+                        {displayText}
+                      </span>
+                      {isCurrent && (
+                        <span className="ml-auto flex-shrink-0 text-[9px] text-primary font-semibold">NOW</span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* Preview */}
+              <div className="mt-2.5 pt-2.5 border-t border-border/20">
+                <p className="text-[10px] text-muted-foreground/50 mb-1.5 font-medium uppercase tracking-wider">
+                  Will appear on card:
+                </p>
+                <div className="space-y-0.5">
+                  {lyrics.slice(selectedStart, selectedStart + LINES_PER_CARD).map((line, i) => {
+                    const text = lyricSource === "translated" && hasTranslated && translatedLines
+                      ? (translatedLines[selectedStart + i] ?? line.text)
+                      : line.text
+                    return (
+                      <p
+                        key={line.id}
+                        className={`text-xs leading-snug truncate ${
+                          selectedStart + i === currentLyricIndex
+                            ? "text-foreground font-semibold"
+                            : "text-muted-foreground/60"
+                        }`}
+                      >
+                        {text}
+                      </p>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -562,7 +645,7 @@ export default function ShareCardGenerator({
         <Button
           variant="outline" size="sm"
           className="flex-1 gap-2 rounded-xl"
-          onClick={() => renderCard(effectiveStyle, selectedStart)}
+          onClick={() => renderCard(effectiveStyle, selectedStart, lyricSource)}
           disabled={loading}
         >
           <RefreshCw className="w-3.5 h-3.5" />

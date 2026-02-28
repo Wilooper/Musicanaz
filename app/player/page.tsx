@@ -8,7 +8,7 @@ import {
   ListMusic, Music, GripVertical, Trash2, ChevronUp, ChevronDown as ChevronDownIcon,
   Zap, Download, Check, Radio, Loader2 as SpinnerIcon,
   Type, Languages, Sparkles, RotateCcw, Share2, Link2 as Link,
-  Maximize2, Timer, Users, QrCode, Copy, Clock, Smile,
+  Maximize2, Timer, Users, QrCode, Copy, Clock, Smile, Star, X as XIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import ImageWithFallback from "@/components/image-with-fallback"
@@ -19,6 +19,7 @@ import {
   addSongToPlaylist, createPlaylist, addToRecentlyPlayed,
   addToDownloaded, isDownloaded, getPreferences,
   getReactions, addReaction, type Reaction,
+  getFavMoments, saveFavMoment, deleteFavMoment, type FavMoment,
 } from "@/lib/storage"
 import {
   Dialog, DialogContent, DialogDescription,
@@ -295,11 +296,18 @@ function PlayerContent() {
   const [aiError,            setAiError]            = useState<string|null>(null)
   // Share feature
   const [showShareDialog,    setShowShareDialog]    = useState(false)
-  const [shareTimestamp,     setShareTimestamp]     = useState(0)
-  const [shareUseTimestamp,  setShareUseTimestamp]  = useState(false)
-  const [shareCopied,        setShareCopied]        = useState(false)
-  const [shareTab,           setShareTab]           = useState<"link" | "card">("link")
+  const [shareTimestamp,      setShareTimestamp]      = useState(0)
+  const [shareUseTimestamp,   setShareUseTimestamp]   = useState(false)
+  const [shareEndTimestamp,   setShareEndTimestamp]   = useState(0)
+  const [shareUseEndTimestamp,setShareUseEndTimestamp]= useState(false)
+  const [shareCopied,         setShareCopied]         = useState(false)
+  const [shareTab,            setShareTab]            = useState<"link" | "card">("link")
   const [showLikeAnim,       setShowLikeAnim]       = useState(false)
+  // Favourite moments (triple-tap thumbnail to bookmark current position)
+  const [favMoments,         setFavMoments]         = useState<FavMoment[]>([])
+  const [showFavSaved,       setShowFavSaved]       = useState(false)
+  const tapCountRef = useRef(0)
+  const tapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [showSleepTimerDlg,  setShowSleepTimerDlg]  = useState(false)
   const [sleepTimeMinutes,   setSleepTimeMinutes]   = useState(0)
   const [sleepTimerActive,   setSleepTimerActive]   = useState(false)
@@ -321,6 +329,7 @@ function PlayerContent() {
     queue, queueIndex, isLoading,
     removeFromQueue, moveInQueue,
     partyId, isPartyHost, startParty, stopParty,
+    stopAtTime,
     queueExhausted, suggestions, dismissSuggestions, playFromSuggestions,
     crossfadeSecs, setCrossfadeSecs,
   } = useAudio()
@@ -344,17 +353,21 @@ function PlayerContent() {
   const displayThumbnail = currentSong?.thumbnail || thumbnail
 
   const startTimestamp = Number(params.get("t") || 0)
+  const endTimestamp   = Number(params.get("e") || 0)
 
   useEffect(() => {
     if (songId && title && artist && (!currentSong || currentSong.id !== songId)) {
+      // Pass stopAt directly into playSong — it's stored in pendingStopAtRef
+      // and applied the moment the YT player fires the PLAYING state.
+      // This is race-free regardless of how long YT takes to load on mobile.
       playSong({
         id: songId, title, artist, thumbnail, type: type as any, videoId: videoId || songId,
         isPodcast: isPodcastParam || undefined,
         podcastId: podcastId || undefined,
         podcastTitle: podcastTitle || undefined,
-      }, true, startTimestamp)
+      }, true, startTimestamp, endTimestamp > startTimestamp ? endTimestamp : 0)
     }
-  }, [songId, startTimestamp]) // eslint-disable-line
+  }, [songId, startTimestamp, endTimestamp]) // eslint-disable-line
 
   // Fetch podcast episodes when in podcast mode
   useEffect(() => {
@@ -431,6 +444,13 @@ function PlayerContent() {
       }
     }
   }, [isPlaying, currentTime, duration, sleepMode, sleepTimerActive, stopSong])
+
+  // Favourite moments — reload when song changes
+  useEffect(() => {
+    const vid = currentSong?.videoId || currentSong?.id || songId
+    if (vid) setFavMoments(getFavMoments(vid))
+    else     setFavMoments([])
+  }, [currentSong?.id, songId])
 
   // Load reactions for current song
   useEffect(() => {
@@ -612,11 +632,16 @@ function PlayerContent() {
     const ar    = currentSong?.artist    || artist
     const th    = currentSong?.thumbnail || thumbnail
     const base  = typeof window !== "undefined" ? window.location.origin : ""
-    const params: Record<string, string> = {
+    const p: Record<string, string> = {
       id: vid, title: t, artist: ar, thumbnail: th, type: "musiva", videoId: vid,
     }
-    if (shareUseTimestamp && shareTimestamp > 0) params.t = String(shareTimestamp)
-    return `${base}/player?${new URLSearchParams(params).toString()}`
+    if (shareUseTimestamp    && shareTimestamp    > 0) p.t = String(shareTimestamp)
+    if (shareUseEndTimestamp && shareEndTimestamp > 0
+        && shareEndTimestamp > (shareUseTimestamp ? shareTimestamp : 0)) {
+      p.e = String(shareEndTimestamp)
+    }
+    // /song route gives rich OG preview in messaging apps; it then redirects to /player
+    return `${base}/song?${new URLSearchParams(p).toString()}`
   }
 
   const copyShareUrl = async () => {
@@ -659,6 +684,23 @@ function PlayerContent() {
       }
     }
   }
+
+  // Triple-tap thumbnail → bookmark current position as a favourite moment
+  const handleTripleTap = useCallback(() => {
+    tapCountRef.current += 1
+    if (tapTimerRef.current) clearTimeout(tapTimerRef.current)
+    tapTimerRef.current = setTimeout(() => { tapCountRef.current = 0 }, 600)
+    if (tapCountRef.current >= 3) {
+      tapCountRef.current = 0
+      if (tapTimerRef.current) { clearTimeout(tapTimerRef.current); tapTimerRef.current = null }
+      const vid = currentSong?.videoId || currentSong?.id || songId
+      if (!vid || currentTime <= 0) return
+      saveFavMoment(vid, currentTime)
+      setFavMoments(getFavMoments(vid))
+      setShowFavSaved(true)
+      setTimeout(() => setShowFavSaved(false), 2000)
+    }
+  }, [currentSong, songId, currentTime])
 
   // Download — opens YouTube Music in new tab (actual audio extraction not possible client-side)
   const handleDownload = () => {
@@ -782,6 +824,7 @@ function PlayerContent() {
             <div className="flex justify-center px-8 mt-3 mb-4 flex-shrink-0">
               <div
                 onDoubleClick={handleLike}
+                onClick={handleTripleTap}
                 className={[
                   "relative overflow-hidden rounded-2xl shadow-2xl transition-all duration-500 cursor-pointer active:scale-95",
                   "w-[min(72vw,260px)] sm:w-[min(72vw,288px)] aspect-square",
@@ -803,6 +846,15 @@ function PlayerContent() {
                 {showLikeAnim && (
                   <div className="absolute inset-0 flex items-center justify-center z-30 pointer-events-none animate-in zoom-in duration-300">
                     <Heart className="w-20 h-20 text-red-500 fill-red-500 drop-shadow-2xl" />
+                  </div>
+                )}
+                {showFavSaved && (
+                  <div className="absolute inset-0 flex items-center justify-center z-30 pointer-events-none animate-in fade-in duration-200">
+                    <div className="flex flex-col items-center gap-1.5 bg-black/70 rounded-2xl px-5 py-3 backdrop-blur-sm">
+                      <Star className="w-10 h-10 text-amber-400 fill-amber-400 drop-shadow-lg" />
+                      <span className="text-white text-xs font-semibold">Moment saved!</span>
+                      <span className="text-white/60 text-[10px] font-mono">{fmt(Math.round(currentTime))}</span>
+                    </div>
                   </div>
                 )}
                 {isLoading && (
@@ -1222,6 +1274,35 @@ function PlayerContent() {
               </div>
             )}
 
+            {/* ── Favourite moment jump pills ── */}
+            {favMoments.length > 0 && (
+              <div className="px-6 mb-2 flex-shrink-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <Star className="w-3 h-3 text-amber-400 fill-amber-400 flex-shrink-0" />
+                  {favMoments.map((m) => (
+                    <div key={m.savedAt} className="flex items-center gap-0.5">
+                      <button
+                        onClick={() => seek(m.time)}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-400 text-[11px] font-semibold transition-all active:scale-95"
+                      >
+                        {fmt(m.time)}
+                      </button>
+                      <button
+                        onClick={() => {
+                          const vid = currentSong?.videoId || currentSong?.id || songId
+                          if (vid) { deleteFavMoment(vid, m.savedAt); setFavMoments(getFavMoments(vid)) }
+                        }}
+                        className="w-4 h-4 rounded-full text-muted-foreground/40 hover:text-red-400 flex items-center justify-center transition-all"
+                      >
+                        <XIcon className="w-2.5 h-2.5" />
+                      </button>
+                    </div>
+                  ))}
+                  <span className="text-[9px] text-muted-foreground/30 ml-auto">triple-tap to add</span>
+                </div>
+              </div>
+            )}
+
             {/* Progress */}
             <div className="px-6 mb-1 flex-shrink-0">
               <Slider
@@ -1405,21 +1486,19 @@ function PlayerContent() {
             </div>
 
             {shareTab === "link" ? (
-              <div className="space-y-4 py-1">
-                {/* Timestamp toggle */}
+              <div className="space-y-3 py-1">
+                {/* ── Start time ── */}
                 <div
-                  className="flex items-center justify-between p-4 rounded-2xl bg-muted/30 border border-border/30 cursor-pointer hover:bg-muted/40 transition-colors"
+                  className="flex items-center justify-between px-4 py-3 rounded-2xl bg-muted/30 border border-border/30 cursor-pointer hover:bg-muted/40 transition-colors"
                   onClick={() => setShareUseTimestamp(v => !v)}
                 >
                   <div>
-                    <p className="text-sm font-semibold">Include timestamp</p>
+                    <p className="text-sm font-semibold">▶ Start at</p>
                     <p className="text-xs text-muted-foreground">
-                      Link starts at {fmt(shareTimestamp)}
+                      {shareUseTimestamp ? `Clip starts at ${fmt(shareTimestamp)}` : "Plays from beginning"}
                     </p>
                   </div>
-                  <div
-                    className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${shareUseTimestamp ? "bg-primary" : "bg-muted"}`}
-                  >
+                  <div className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${shareUseTimestamp ? "bg-primary" : "bg-muted"}`}>
                     <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${shareUseTimestamp ? "translate-x-5" : "translate-x-0.5"}`} />
                   </div>
                 </div>
@@ -1441,11 +1520,59 @@ function PlayerContent() {
                   </div>
                 )}
 
+                {/* ── End / Stop at ── */}
+                <div
+                  className="flex items-center justify-between px-4 py-3 rounded-2xl bg-muted/30 border border-border/30 cursor-pointer hover:bg-muted/40 transition-colors"
+                  onClick={() => setShareUseEndTimestamp(v => !v)}
+                >
+                  <div>
+                    <p className="text-sm font-semibold">⏹ Stop at</p>
+                    <p className="text-xs text-muted-foreground">
+                      {shareUseEndTimestamp ? `Clip stops at ${fmt(shareEndTimestamp)}` : "Plays to the end"}
+                    </p>
+                  </div>
+                  <div className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${shareUseEndTimestamp ? "bg-primary" : "bg-muted"}`}>
+                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${shareUseEndTimestamp ? "translate-x-5" : "translate-x-0.5"}`} />
+                  </div>
+                </div>
+
+                {shareUseEndTimestamp && (
+                  <div className="px-1">
+                    <Slider
+                      value={[shareEndTimestamp || Math.min((shareUseTimestamp ? shareTimestamp : 0) + 30, duration || 300)]}
+                      min={shareUseTimestamp ? shareTimestamp + 1 : 1}
+                      max={duration || 300}
+                      step={1}
+                      onValueChange={([v]) => setShareEndTimestamp(v)}
+                      className="mb-2"
+                    />
+                    <div className="flex justify-between text-xs text-muted-foreground tabular-nums">
+                      <span>{shareUseTimestamp ? fmt(shareTimestamp) : "0:00"}</span>
+                      <span className="font-semibold text-primary text-sm">{fmt(shareEndTimestamp)}</span>
+                      <span>{fmt(duration)}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Clip preview badge */}
+                {(shareUseTimestamp || shareUseEndTimestamp) && (
+                  <div className="flex items-center justify-center gap-2 py-1.5 rounded-xl bg-primary/8 border border-primary/15">
+                    <span className="text-xs font-semibold text-primary tabular-nums">
+                      Clip: {shareUseTimestamp ? fmt(shareTimestamp) : "0:00"}
+                      {" → "}
+                      {shareUseEndTimestamp ? fmt(shareEndTimestamp) : fmt(duration)}
+                      {shareUseTimestamp && shareUseEndTimestamp
+                        ? ` (${fmt(shareEndTimestamp - shareTimestamp)} long)`
+                        : ""}
+                    </span>
+                  </div>
+                )}
+
                 {/* URL preview */}
                 <div className="flex items-center gap-2 p-2.5 rounded-xl bg-muted/20 border border-border/20">
                   <Link className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
                   <p className="text-xs text-muted-foreground truncate flex-1 font-mono select-all">
-                    {typeof window !== "undefined" ? buildShareUrl().replace(window.location.origin, "musicana.vercel.app") : ""}
+                    {typeof window !== "undefined" ? buildShareUrl().replace(window.location.origin, "musicanaz.vercel.app") : ""}
                   </p>
                 </div>
               </div>
@@ -1457,6 +1584,8 @@ function PlayerContent() {
                   thumbnail={currentSong?.thumbnail || thumbnail || ""}
                   lyrics={lyrics}
                   currentLyricIndex={currentLyricIndex}
+                  translatedLines={aiLines}
+                  translationMode={aiMode}
                 />
               </div>
             )}
@@ -1483,21 +1612,29 @@ function PlayerContent() {
           </DialogContent>
         </Dialog>
       ) : (
-        <Drawer open={showShareDialog} onOpenChange={setShowShareDialog}>
-          <DrawerContent className="border-border/40 bg-card/95 backdrop-blur-xl rounded-t-[32px]">
-            <DrawerHeader className="text-left">
-              <DrawerTitle className="flex items-center gap-2 text-base">
-                <Share2 className="w-4 h-4 text-primary" />
-                Share Song
-              </DrawerTitle>
-              <DrawerDescription className="text-sm text-muted-foreground">
+        <Drawer open={showShareDialog} onOpenChange={setShowShareDialog} dismissible={false}>
+          <DrawerContent className="border-border/40 bg-card/95 backdrop-blur-xl rounded-t-[32px] max-h-[90dvh] flex flex-col">
+            <DrawerHeader className="text-left flex-shrink-0 pb-0">
+              <div className="flex items-center justify-between">
+                <DrawerTitle className="flex items-center gap-2 text-base">
+                  <Share2 className="w-4 h-4 text-primary" />
+                  Share Song
+                </DrawerTitle>
+                <button
+                  onClick={() => setShowShareDialog(false)}
+                  className="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <XIcon className="w-4 h-4" />
+                </button>
+              </div>
+              <DrawerDescription className="text-sm text-muted-foreground mt-0.5">
                 {(currentSong?.title || title)}{(currentSong?.artist || artist) ? ` · ${currentSong?.artist || artist}` : ""}
               </DrawerDescription>
             </DrawerHeader>
 
-            <div className="px-4 pb-2">
-              {/* Tab switcher */}
-              <div className="flex gap-1 bg-muted/30 rounded-xl p-1 mb-4">
+            {/* Tab switcher — outside scroll so always visible */}
+            <div className="px-4 pt-3 flex-shrink-0">
+              <div className="flex gap-1 bg-muted/30 rounded-xl p-1">
                 {(["link", "card"] as const).map(t => (
                   <button
                     key={t}
@@ -1511,23 +1648,27 @@ function PlayerContent() {
                   </button>
                 ))}
               </div>
+            </div>
 
+            {/* Scrollable content — data-vaul-no-drag prevents vaul from treating scroll as dismiss */}
+            <div
+              data-vaul-no-drag
+              className="flex-1 overflow-y-auto overscroll-contain px-4 pb-4 pt-3"
+            >
               {shareTab === "link" ? (
-                <div className="space-y-5 py-2">
-                  {/* Timestamp toggle */}
+                <div className="space-y-4 py-2">
+                  {/* ── Start time ── */}
                   <div
                     className="flex items-center justify-between p-4 rounded-2xl bg-muted/40 border border-border/30 active:scale-[0.98] transition-all"
                     onClick={() => setShareUseTimestamp(v => !v)}
                   >
                     <div>
-                      <p className="text-sm font-semibold">Include timestamp</p>
+                      <p className="text-sm font-semibold">▶ Start at</p>
                       <p className="text-xs text-muted-foreground">
-                        Link starts at {fmt(shareTimestamp)}
+                        {shareUseTimestamp ? `Clip starts at ${fmt(shareTimestamp)}` : "Plays from beginning"}
                       </p>
                     </div>
-                    <div
-                      className={`relative w-12 h-6 rounded-full transition-colors flex-shrink-0 ${shareUseTimestamp ? "bg-primary" : "bg-muted"}`}
-                    >
+                    <div className={`relative w-12 h-6 rounded-full transition-colors flex-shrink-0 ${shareUseTimestamp ? "bg-primary" : "bg-muted"}`}>
                       <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${shareUseTimestamp ? "translate-x-6" : "translate-x-1"}`} />
                     </div>
                   </div>
@@ -1549,46 +1690,93 @@ function PlayerContent() {
                     </div>
                   )}
 
+                  {/* ── Stop at ── */}
+                  <div
+                    className="flex items-center justify-between p-4 rounded-2xl bg-muted/40 border border-border/30 active:scale-[0.98] transition-all"
+                    onClick={() => setShareUseEndTimestamp(v => !v)}
+                  >
+                    <div>
+                      <p className="text-sm font-semibold">⏹ Stop at</p>
+                      <p className="text-xs text-muted-foreground">
+                        {shareUseEndTimestamp ? `Clip stops at ${fmt(shareEndTimestamp)}` : "Plays to the end"}
+                      </p>
+                    </div>
+                    <div className={`relative w-12 h-6 rounded-full transition-colors flex-shrink-0 ${shareUseEndTimestamp ? "bg-primary" : "bg-muted"}`}>
+                      <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${shareUseEndTimestamp ? "translate-x-6" : "translate-x-1"}`} />
+                    </div>
+                  </div>
+
+                  {shareUseEndTimestamp && (
+                    <div className="px-1">
+                      <Slider
+                        value={[shareEndTimestamp || Math.min((shareUseTimestamp ? shareTimestamp : 0) + 30, duration || 300)]}
+                        min={shareUseTimestamp ? shareTimestamp + 1 : 1}
+                        max={duration || 300}
+                        step={1}
+                        onValueChange={([v]) => setShareEndTimestamp(v)}
+                        className="mb-3"
+                      />
+                      <div className="flex justify-between text-[11px] text-muted-foreground tabular-nums">
+                        <span>{shareUseTimestamp ? fmt(shareTimestamp) : "0:00"}</span>
+                        <span className="font-bold text-primary text-sm">{fmt(shareEndTimestamp)}</span>
+                        <span>{fmt(duration)}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Clip preview badge */}
+                  {(shareUseTimestamp || shareUseEndTimestamp) && (
+                    <div className="flex items-center justify-center gap-2 py-2 rounded-xl bg-primary/8 border border-primary/15">
+                      <span className="text-xs font-semibold text-primary tabular-nums">
+                        Clip: {shareUseTimestamp ? fmt(shareTimestamp) : "0:00"}
+                        {" → "}
+                        {shareUseEndTimestamp ? fmt(shareEndTimestamp) : fmt(duration)}
+                        {shareUseTimestamp && shareUseEndTimestamp
+                          ? ` (${fmt(shareEndTimestamp - shareTimestamp)} long)`
+                          : ""}
+                      </span>
+                    </div>
+                  )}
+
                   {/* URL preview */}
                   <div className="flex items-center gap-2.5 p-3 rounded-xl bg-muted/30 border border-border/20">
                     <Link className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                     <p className="text-xs text-muted-foreground truncate flex-1 font-mono select-all">
-                      {typeof window !== "undefined" ? buildShareUrl().replace(window.location.origin, "musicana.vercel.app") : ""}
+                      {typeof window !== "undefined" ? buildShareUrl().replace(window.location.origin, "musicanaz.vercel.app") : ""}
                     </p>
+                  </div>
+
+                  {/* Link share buttons */}
+                  <div className="flex gap-3 pt-1 pb-2">
+                    <Button
+                      onClick={copyShareUrl}
+                      variant="outline"
+                      className="rounded-2xl flex-1 gap-2 h-12 text-sm font-medium"
+                    >
+                      {shareCopied ? <Check className="w-4 h-4 text-green-400" /> : <Link className="w-4 h-4" />}
+                      {shareCopied ? "Copied" : "Copy Link"}
+                    </Button>
+                    <Button
+                      onClick={nativeShare}
+                      className="rounded-2xl flex-1 gap-2 h-12 text-sm font-medium"
+                    >
+                      <Share2 className="w-4 h-4" />
+                      Share
+                    </Button>
                   </div>
                 </div>
               ) : (
-                <div className="py-2">
-                  <ShareCardGenerator
-                    title={currentSong?.title || title || "Unknown"}
-                    artist={currentSong?.artist || artist || "Unknown"}
-                    thumbnail={currentSong?.thumbnail || thumbnail || ""}
-                    lyrics={lyrics}
-                    currentLyricIndex={currentLyricIndex}
-                  />
-                </div>
+                <ShareCardGenerator
+                  title={currentSong?.title || title || "Unknown"}
+                  artist={currentSong?.artist || artist || "Unknown"}
+                  thumbnail={currentSong?.thumbnail || thumbnail || ""}
+                  lyrics={lyrics}
+                  currentLyricIndex={currentLyricIndex}
+                  translatedLines={aiLines}
+                  translationMode={aiMode}
+                />
               )}
             </div>
-
-            {shareTab === "link" && (
-              <DrawerFooter className="flex-row gap-3 pt-4 pb-8">
-                <Button
-                  onClick={copyShareUrl}
-                  variant="outline"
-                  className="rounded-2xl flex-1 gap-2 h-12 text-sm font-medium"
-                >
-                  {shareCopied ? <Check className="w-4 h-4 text-green-400" /> : <Link className="w-4 h-4" />}
-                  {shareCopied ? "Copied" : "Copy Link"}
-                </Button>
-                <Button
-                  onClick={nativeShare}
-                  className="rounded-2xl flex-1 gap-2 h-12 text-sm font-medium"
-                >
-                  <Share2 className="w-4 h-4" />
-                  Share
-                </Button>
-              </DrawerFooter>
-            )}
           </DrawerContent>
         </Drawer>
       )}

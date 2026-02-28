@@ -12,6 +12,10 @@
   "categories": ["music", "entertainment", "lifestyle"],
   "lang": "en",
   "dir": "ltr",
+  "handle_links": "preferred",
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  },
   "icons": [
     {
       "src": "https://raw.githubusercontent.com/wilooper/Asset/main/logo.png",

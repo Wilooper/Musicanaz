@@ -6,7 +6,7 @@ import {
   useEffect, useCallback, type ReactNode,
 } from "react"
 import type { LyricLine, LyricsResponse, Song, UpNextQueue } from "./types"
-import { recordListenSeconds, addToSongHistory } from "./storage"
+import { recordListenSeconds, addToSongHistory, recordBadgeEvent } from "./storage"
 
 const LYRICS_API = "https://test-0k.onrender.com"
 
@@ -24,7 +24,7 @@ interface AudioContextType {
   queueIndex:        number
   isCached:          boolean
   isLoading:         boolean
-  playSong:          (song: Song, isManual?: boolean, startTime?: number) => void
+  playSong:          (song: Song, isManual?: boolean, startTime?: number, stopAt?: number) => void
   playPlaylist:      (songs: Song[], startIndex?: number) => void
   togglePlayPause:   () => void
   seek:              (time: number) => void
@@ -51,6 +51,9 @@ interface AudioContextType {
   // Crossfade
   crossfadeSecs:     number
   setCrossfadeSecs:  (secs: number) => void
+  // Shared clip stop-at
+  stopAtTime:        number
+  setStopAtTime:     (t: number) => void
 }
 
 const AudioCtx = createContext<AudioContextType | undefined>(undefined)
@@ -78,12 +81,34 @@ function loadYTApi(): Promise<void> {
 }
 
 // ─── helpers ──────────────────────────────────────────────
+// Quality rank for YouTube thumbnail URLs (higher = better)
+function ytQuality(url: string): number {
+  if (!url) return 0
+  if (url.includes("maxresdefault")) return 7
+  if (url.includes("sddefault"))    return 6
+  if (url.includes("hqdefault"))    return 5
+  if (url.includes("mqdefault"))    return 4
+  if (url.includes("0.jpg") || url.includes("0.webp")) return 3
+  if (url.includes("default"))      return 2
+  return 1
+}
+
+function bestThumb(thumbnails: any, fallback = ""): string {
+  if (!Array.isArray(thumbnails) || !thumbnails.length) return fallback
+  const sorted = [...thumbnails].sort((a, b) => {
+    const aw = typeof a === "string" ? 0 : (a?.width || 0)
+    const bw = typeof b === "string" ? 0 : (b?.width || 0)
+    if (bw !== aw) return bw - aw
+    const aUrl = typeof a === "string" ? a : (a?.url || "")
+    const bUrl = typeof b === "string" ? b : (b?.url || "")
+    return ytQuality(bUrl) - ytQuality(aUrl)
+  })
+  const t = sorted[0]
+  return (typeof t === "string" ? t : (t?.url || "")) || fallback
+}
+
 function trackToSong(t: any): Song {
-  const thumb =
-    t.thumbnail ||
-    (Array.isArray(t.thumbnails)
-      ? (typeof t.thumbnails[0] === "string" ? t.thumbnails[0] : t.thumbnails[0]?.url) || ""
-      : "")
+  const thumb = bestThumb(t.thumbnails, t.thumbnail || "")
   const artist = Array.isArray(t.artists)
     ? t.artists.map((a: any) => (typeof a === "string" ? a : a?.name || "")).join(", ")
     : String(t.artists || t.artist || "Unknown")
@@ -145,6 +170,12 @@ export function AudioProvider({ children }: { children: ReactNode }) {
   // Crossfade
   const [crossfadeSecs, setCrossfadeSecsState] = useState(0)
   const crossfadeSecsRef  = useRef(0)
+
+  // Stop-at time for shared clips (0 = disabled)
+  const [stopAtTime,    setStopAtTimeState] = useState(0)
+  const stopAtTimeRef   = useRef(0)
+  // Pending stop-at: set before song loads, applied the moment PLAYING fires
+  const pendingStopAtRef = useRef(0)
   const fadeMultiplierRef = useRef(1)   // 1.0 = full, 0.0 = silent
   const fadingOutRef      = useRef(false)
   const fadingInRef       = useRef(false)
@@ -172,6 +203,10 @@ export function AudioProvider({ children }: { children: ReactNode }) {
     div.id = "__yt_player__"
     div.style.cssText =
       "position:fixed;bottom:-9999px;left:-9999px;width:1px;height:1px;overflow:hidden;pointer-events:none;opacity:0;"
+    // aria-hidden prevents screen readers and Android media detection from treating
+    // the hidden iframe as a video element and showing video playback controls
+    div.setAttribute("aria-hidden", "true")
+    div.setAttribute("role", "presentation")
     document.body.appendChild(div)
     ytContainerRef.current = div
     return () => { div.remove(); ytContainerRef.current = null }
@@ -210,6 +245,28 @@ export function AudioProvider({ children }: { children: ReactNode }) {
         const dur = durationRef.current
         setCurrentTime(ct)
         syncLyrics(ct)
+
+        // ── Update Media Session position (keeps Android scrubber accurate) ──
+        if (typeof navigator !== "undefined" &&
+            "mediaSession" in navigator &&
+            typeof navigator.mediaSession.setPositionState === "function" &&
+            dur > 0 && ct > 0) {
+          try {
+            navigator.mediaSession.setPositionState({
+              duration:     dur,
+              playbackRate: 1,
+              position:     Math.min(ct, dur),
+            })
+          } catch {}
+        }
+
+        // ── Stop-at clip enforcement ────────────────────────
+        const sat = stopAtTimeRef.current
+        if (sat > 0 && ct >= sat) {
+          try { p.pauseVideo() } catch {}
+          stopAtTimeRef.current = 0
+          setStopAtTimeState(0)
+        }
 
         // ── Crossfade fade-out ──────────────────────────────
         const cf = crossfadeSecsRef.current
@@ -251,23 +308,43 @@ export function AudioProvider({ children }: { children: ReactNode }) {
         ] : [],
       })
       navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused"
+      // setPositionState tells Android this is music (not video) and provides
+      // the scrubber in the notification. Without this Chrome shows video controls.
+      if (typeof navigator.mediaSession.setPositionState === "function") {
+        try {
+          const dur = durationRef.current
+          const ct  = ytPlayerRef.current?.getCurrentTime?.() ?? 0
+          if (dur > 0) {
+            navigator.mediaSession.setPositionState({
+              duration:     dur,
+              playbackRate: 1,
+              position:     Math.min(ct, dur),
+            })
+          }
+        } catch {}
+      }
     } catch {}
   }, [currentSong, isPlaying])
 
   // Register Media Session action handlers once
   useEffect(() => {
     if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return
+    // Only register music-appropriate handlers.
+    // seekforward/seekbackward are omitted intentionally: they cause Android Chrome
+    // to show video-style 10s seek buttons instead of music prev/next controls.
     const handlers: Array<[MediaSessionAction, MediaSessionActionHandler]> = [
-      ["play",           () => { const p = ytPlayerRef.current; if (p) try { p.playVideo() } catch {} }],
-      ["pause",          () => { const p = ytPlayerRef.current; if (p) try { p.pauseVideo() } catch {} }],
-      ["nexttrack",      () => { playNext() }],
-      ["previoustrack",  () => { playPrev() }],
-      ["seekto",         (d) => { if (d.seekTime != null) seek(d.seekTime) }],
-      ["seekforward",    (d) => { seek(Math.min((durationRef.current), (ytPlayerRef.current?.getCurrentTime?.() || 0) + (d.seekOffset || 10))) }],
-      ["seekbackward",   (d) => { seek(Math.max(0, (ytPlayerRef.current?.getCurrentTime?.() || 0) - (d.seekOffset || 10))) }],
+      ["play",          () => { const p = ytPlayerRef.current; if (p) try { p.playVideo() } catch {} }],
+      ["pause",         () => { const p = ytPlayerRef.current; if (p) try { p.pauseVideo() } catch {} }],
+      ["nexttrack",     () => { playNext() }],
+      ["previoustrack", () => { playPrev() }],
+      ["seekto",        (d) => { if (d.seekTime != null) seek(d.seekTime) }],
     ]
     for (const [action, handler] of handlers) {
       try { navigator.mediaSession.setActionHandler(action, handler) } catch {}
+    }
+    // Explicitly null-out the video-style handlers so Android Chrome removes them
+    for (const action of ["seekforward", "seekbackward"] as MediaSessionAction[]) {
+      try { navigator.mediaSession.setActionHandler(action, null) } catch {}
     }
     return () => {
       for (const [action] of handlers) {
@@ -281,6 +358,10 @@ export function AudioProvider({ children }: { children: ReactNode }) {
     const p = ytPlayerRef.current
     if (!p || typeof p.setVolume !== "function") return
     try { p.setVolume(volume) } catch {}
+    // Badge: track max-volume sessions
+    if (volume >= 100 && typeof window !== "undefined") {
+      (window as any).__musicana_vol_max = true
+    }
   }, [volume])
 
   // ── listen time tracker — records 5s every 5s while playing ─
@@ -375,6 +456,9 @@ export function AudioProvider({ children }: { children: ReactNode }) {
           fs: 0, iv_load_policy: 3, modestbranding: 1,
           rel: 0, showinfo: 0, playsinline: 1,
           start: startTime,
+          // These help Android Chrome identify this as background audio, not video
+          origin: typeof window !== "undefined" ? window.location.origin : "",
+          widget_referrer: typeof window !== "undefined" ? window.location.origin : "",
         },
         events: {
           onReady: (e: any) => {
@@ -392,6 +476,13 @@ export function AudioProvider({ children }: { children: ReactNode }) {
               setIsPlaying(true)
               const dur = e.target.getDuration()
               if (dur) setDuration(dur)
+              // Apply any pending stop-at the moment playback actually starts.
+              // This is the reliable hook — avoids race conditions with timeouts.
+              if (pendingStopAtRef.current > 0) {
+                stopAtTimeRef.current = pendingStopAtRef.current
+                setStopAtTimeState(pendingStopAtRef.current)
+                pendingStopAtRef.current = 0
+              }
             } else if (e.data === S.PAUSED) {
               setIsPlaying(false)
             } else if (e.data === S.BUFFERING) {
@@ -400,6 +491,13 @@ export function AudioProvider({ children }: { children: ReactNode }) {
               setIsPlaying(false)
               setCurrentTime(0)
               fadingOutRef.current = false
+              // Badge: track song completion for no-skip streak
+              recordBadgeEvent("song_complete")
+              // Volume max badge: check if at max
+              if (typeof window !== "undefined" && (window as any).__musicana_vol_max) {
+                recordBadgeEvent("volume_max")
+                ;(window as any).__musicana_vol_max = false
+              }
               // Restore volume for next song
               if (ytPlayerRef.current && typeof ytPlayerRef.current.setVolume === "function") {
                 try { ytPlayerRef.current.setVolume(volumeRef.current) } catch {}
@@ -457,6 +555,10 @@ export function AudioProvider({ children }: { children: ReactNode }) {
   const _advanceToSong = useCallback(async (song: Song, startTime = 0) => {
     if (isLoadingRef.current) return
     isLoadingRef.current = true
+    // Clear any pending clip stop-at when manually changing track
+    stopAtTimeRef.current = 0
+    setStopAtTimeState(0)
+    pendingStopAtRef.current = 0
     setQueueExhausted(false)
     setSuggestions([])
     try {
@@ -533,6 +635,13 @@ export function AudioProvider({ children }: { children: ReactNode }) {
       if (!song.isPodcast) loadLyrics(song)
 
       addToSongHistory(song)
+      // Badge events: session start + genre tracking
+      const nowH = new Date().getHours()
+      recordBadgeEvent("session_start")
+      if ((song as any).genre) recordBadgeEvent("genre_play", (song as any).genre)
+      if (typeof window !== "undefined" && (window as any).__musicana_noskip_count === undefined) {
+        (window as any).__musicana_noskip_count = 0
+      }
       const videoId = song.videoId || song.id
       await loadYTApi()
       await loadVideo(videoId, startTime)
@@ -551,7 +660,13 @@ export function AudioProvider({ children }: { children: ReactNode }) {
   }, [loadVideo, fetchUpNext])
 
   // ── public API ───────────────────────────────────────────
-  const playSong = useCallback((song: Song, isManual = true, startTime = 0) => {
+  const playSong = useCallback((song: Song, isManual = true, startTime = 0, stopAt = 0) => {
+    // Store stopAt in the pending ref — it will be applied the moment PLAYING fires
+    if (stopAt > 0 && stopAt > startTime) {
+      pendingStopAtRef.current = stopAt
+    } else {
+      pendingStopAtRef.current = 0
+    }
     if (isManual) {
       _manualPlay(song, startTime)
     } else {
@@ -571,6 +686,7 @@ export function AudioProvider({ children }: { children: ReactNode }) {
     const idx = queueIndexRef.current
     const nextIdx = idx + 1
     if (nextIdx < q.length) {
+      recordBadgeEvent("skip")  // resets no-skip counter
       queueIndexRef.current = nextIdx
       setQueueIndex(nextIdx)
       _advanceToSong(q[nextIdx])
@@ -721,6 +837,11 @@ export function AudioProvider({ children }: { children: ReactNode }) {
     } catch {}
   }, [])
 
+  const setStopAtTime = useCallback((t: number) => {
+    setStopAtTimeState(t)
+    stopAtTimeRef.current = t
+  }, [])
+
   const stopSong = useCallback(() => {
     const p = ytPlayerRef.current
     if (p && typeof p.stopVideo === "function") try { p.stopVideo() } catch {}
@@ -829,7 +950,7 @@ export function AudioProvider({ children }: { children: ReactNode }) {
       lyrics, lyricsLoading, lyricsNotFound, currentLyricIndex, queue, queueIndex,
       isCached, isLoading,
       playSong, playPlaylist, togglePlayPause, seek, setVolume,
-      playNext, playPrev, stopSong,
+      playNext, playPrev, stopSong, stopAtTime, setStopAtTime,
       removeFromQueue, moveInQueue,
       audioRef, ytPlayerRef,
       partyId, isPartyHost, startParty, stopParty, joinParty, addToPartyQueue,
