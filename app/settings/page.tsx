@@ -734,10 +734,10 @@ export default function SettingsPage() {
             <div className="flex items-center justify-center gap-2 mb-2">
               <ImageWithFallback
                 src="https://raw.githubusercontent.com/wilooper/Asset/main/logo.png"
-                alt="MUSICANA"
+                alt="Musicanaz"
                 className="w-10 h-10 rounded-xl object-contain"
               />
-              <h3 className="text-xl font-bold tracking-tight">MUSICANA</h3>
+              <h3 className="text-xl font-bold tracking-tight">Musicanaz</h3>
             </div>
             <p className="text-sm text-muted-foreground leading-relaxed max-w-xs mx-auto">
               A beautifully crafted music streaming experience — search, stream, and discover music without limits.
@@ -812,7 +812,7 @@ export default function SettingsPage() {
           {/* Misc */}
           <div className="rounded-2xl bg-card/40 border border-border/30 divide-y divide-border/20 overflow-hidden">
             {[
-              ["App",          "MUSICANA"],
+              ["App",          "Musicanaz"],
               ["Version",      "1.0.0"],
               ["Open Source",  "No authentication required"],
               ["Data source",  "YouTube Music (unofficial)"],
@@ -826,7 +826,7 @@ export default function SettingsPage() {
           </div>
 
           <p className="text-xs text-center text-muted-foreground/50 mt-4 px-2">
-            MUSICANA is not affiliated with YouTube or Google. All music data is sourced from YouTube Music via an unofficial API for personal use.
+            Musicanaz is not affiliated with YouTube or Google. All music data is sourced from YouTube Music via an unofficial API for personal use.
           </p>
         </section>
 

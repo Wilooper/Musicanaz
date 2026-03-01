@@ -91,7 +91,7 @@ function drawHeader(ctx: CanvasRenderingContext2D, username: string, subtitle: s
   ctx.font = "bold 28px system-ui, -apple-system, sans-serif"
   ctx.fillStyle = "rgba(255,255,255,0.35)"
   ctx.letterSpacing = "4px"
-  ctx.fillText("MUSICANA", PAD, y)
+  ctx.fillText("Musicanaz", PAD, y)
   ctx.letterSpacing = "0px"
 
   const now = new Date()
@@ -459,7 +459,7 @@ export default function WrappedCard({ onClose }: WrappedCardProps) {
     try {
       const a    = document.createElement("a")
       a.href     = canvas.toDataURL("image/png")
-      a.download = `musicana-${mode}-${new Date().toISOString().slice(0, 10)}.png`
+      a.download = `musicanaz-${mode}-${new Date().toISOString().slice(0, 10)}.png`
       a.click()
     } catch {}
     setTimeout(() => setDownloading(false), 800)
@@ -471,9 +471,9 @@ export default function WrappedCard({ onClose }: WrappedCardProps) {
     try {
       canvas.toBlob(async (blob) => {
         if (!blob) return
-        const file = new File([blob], `musicana-${mode}.png`, { type: "image/png" })
+        const file = new File([blob], `musicanaz-${mode}.png`, { type: "image/png" })
         if (navigator.canShare?.({ files: [file] })) {
-          await navigator.share({ files: [file], title: mode === "stats" ? "My MUSICANA Wrapped 🎵" : "My MUSICANA Achievements 🏅" })
+          await navigator.share({ files: [file], title: mode === "stats" ? "My Musicanaz Wrapped 🎵" : "My Musicanaz Achievements 🏅" })
           setShareOk(true)
           setTimeout(() => setShareOk(false), 2000)
         } else { download() }

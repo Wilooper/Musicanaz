@@ -300,7 +300,7 @@ export function AudioProvider({ children }: { children: ReactNode }) {
       navigator.mediaSession.metadata = new MediaMetadata({
         title:  currentSong.title,
         artist: currentSong.artist,
-        album:  (currentSong as any).album || "MUSICANA",
+        album:  (currentSong as any).album || "Musicanaz",
         artwork: currentSong.thumbnail ? [
           { src: `https://images.weserv.nl/?url=${encodeURIComponent(currentSong.thumbnail)}&w=512&h=512&output=jpg`, sizes: "512x512", type: "image/jpeg" },
           { src: `https://images.weserv.nl/?url=${encodeURIComponent(currentSong.thumbnail)}&w=256&h=256&output=jpg`, sizes: "256x256", type: "image/jpeg" },

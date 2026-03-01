@@ -20,7 +20,7 @@ export default function AboutPage() {
             <div className="w-12 h-12 bg-primary rounded-2xl flex items-center justify-center">
               <Music className="w-6 h-6 text-primary-foreground" />
             </div>
-            <h1 className="text-3xl font-bold text-foreground">About MUSICANA.inc</h1>
+            <h1 className="text-3xl font-bold text-foreground">About Musicanaz</h1>
           </div>
         </div>
 
@@ -33,7 +33,7 @@ export default function AboutPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-foreground leading-relaxed">
-                MUSICANA.inc is a modern, feature-rich music streaming application designed to provide you with the best
+                Musicanaz is a modern, feature-rich music streaming application designed to provide you with the best
                 music listening experience. Stream millions of songs, view synchronized lyrics, and enjoy your favorite
                 tracks anytime, anywhere.
               </p>
@@ -84,7 +84,7 @@ export default function AboutPage() {
           <Card>
             <CardHeader>
               <CardTitle>About the Developer</CardTitle>
-              <CardDescription>Meet the creator behind MUSICANA.inc</CardDescription>
+              <CardDescription>Meet the creator behind Musicanaz</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="flex items-center gap-4">
@@ -99,7 +99,7 @@ export default function AboutPage() {
 
               <p className="text-foreground leading-relaxed">
                 Hi! I'm Shaurya Singh, a passionate backend developer who specializes in building robust APIs and music
-                streaming infrastructure. I developed the entire backend system for MUSICANA.inc, including the music
+                streaming infrastructure. I developed the entire backend system for Musicanaz, including the music
                 streaming API, caching system, and data management.
               </p>
 
@@ -202,11 +202,11 @@ export default function AboutPage() {
 
           {/* Version & Credits */}
           <div className="text-center space-y-2 pt-8 pb-4">
-            <p className="text-sm text-muted-foreground">MUSICANA.inc v1.0.0</p>
+            <p className="text-sm text-muted-foreground">Musicanaz v1.0.0</p>
             <p className="text-xs text-muted-foreground">
               Made with <Heart className="w-3 h-3 inline text-red-500 fill-red-500" /> by Shaurya Singh
             </p>
-            <p className="text-xs text-muted-foreground">© 2025 MUSICANA.inc. All rights reserved.</p>
+            <p className="text-xs text-muted-foreground">© 2025 Musicanaz. All rights reserved.</p>
           </div>
         </div>
       </div>

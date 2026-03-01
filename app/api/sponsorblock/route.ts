@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
     // POI (point of highlight) — category=poi_highlight
     const url = `https://sponsor.ajay.app/api/skipSegments?videoID=${encodeURIComponent(videoId)}&categories=["poi_highlight"]&actionTypes=["poi"]`
     const res = await fetch(url, {
-      headers: { "User-Agent": "Musicana/1.0" },
+      headers: { "User-Agent": "Musicanaz/1.0" },
       next: { revalidate: 3600 }, // cache 1hr
     })
 

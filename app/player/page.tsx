@@ -667,7 +667,7 @@ function PlayerContent() {
     const ar   = currentSong?.artist || artist
     if (navigator.share) {
       try {
-        await navigator.share({ title: `${t} – ${ar}`, text: `Listen to ${t} by ${ar} on MUSICANA`, url })
+        await navigator.share({ title: `${t} – ${ar}`, text: `Listen to ${t} by ${ar} on Musicanaz`, url })
       } catch {}
     } else {
       copyShareUrl()

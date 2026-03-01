@@ -10,7 +10,7 @@ export async function generateMetadata({
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }): Promise<Metadata> {
   const sp       = await searchParams
-  const title    = String(sp.title    || "Listen on MUSICANA")
+  const title    = String(sp.title    || "Listen on Musicanaz")
   const artist   = String(sp.artist   || "")
   const videoId  = String(sp.id       || sp.videoId || "")
   const thumb    = String(sp.thumbnail || "")
@@ -28,7 +28,7 @@ export async function generateMetadata({
     artist ? `by ${artist}` : "",
     Number(t) > 0 ? `▶ Starts at ${fmtSec(Number(t))}` : "",
     Number(e) > 0 ? `⏹ Clip ends at ${fmtSec(Number(e))}` : "",
-    "Stream free on MUSICANA with live synced lyrics.",
+    "Stream free on Musicanaz with live synced lyrics.",
   ].filter(Boolean).join("  •  ")
 
   const shareUrl = `${BASE}/song?${new URLSearchParams(sp as Record<string, string>).toString()}`
@@ -41,7 +41,7 @@ export async function generateMetadata({
       title:       displayTitle,
       description: desc,
       url:         shareUrl,
-      siteName:    "MUSICANA",
+      siteName:    "Musicanaz",
       images: [
         {
           url:    ogImage,

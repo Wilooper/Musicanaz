@@ -3,12 +3,12 @@ import type { Metadata } from "next"
 export const metadata: Metadata = {
   title:       "Listening History & Stats",
   description: "See your complete listening history, top played songs of the day, week, and month, plus detailed listening stats and activity heatmap.",
-  alternates:  { canonical: "https://musicana.vercel.app/history" },
+  alternates:  { canonical: "https://musicanaz.vercel.app/history" },
   robots:      { index: false },   // personal data — don't index
   openGraph: {
-    title:       "Your Listening History | MUSICANA",
+    title:       "Your Listening History | Musicanaz",
     description: "Top songs, listening stats, and your full play history.",
-    url:         "https://musicana.vercel.app/history",
+    url:         "https://musicanaz.vercel.app/history",
   },
 }
 

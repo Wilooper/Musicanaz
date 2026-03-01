@@ -334,7 +334,7 @@ export default function ShareCardGenerator({
         ctx.font      = `bold 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
         ctx.fillStyle = "#a78bfa"
         ctx.textBaseline = "middle"
-        ctx.fillText("MUSICANA", 48 + 50, brandY + 14)
+        ctx.fillText("Musicanaz", 48 + 50, brandY + 14)
 
         ctx.font      = `400 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
         ctx.fillStyle = "rgba(255,255,255,0.25)"
@@ -445,7 +445,7 @@ export default function ShareCardGenerator({
       ctx.font = `bold 20px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
       ctx.fillStyle = cardStyle === "light" ? "#6366f1" : "#a78bfa"
       ctx.textBaseline = "middle"
-      ctx.fillText("MUSICANA", infoX + 52, brandY + 16)
+      ctx.fillText("Musicanaz", infoX + 52, brandY + 16)
 
       setRendered(true)
     } catch (e) {

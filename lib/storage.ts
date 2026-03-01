@@ -706,7 +706,7 @@ const ALL_KEYS = [
   "musicana_collab_refs",
 ]
 
-export interface MusicanaBackup {
+export interface MusicanazBackup {
   version:   number
   exportedAt: number
   data:       Record<string, any>
@@ -722,7 +722,7 @@ export function exportAllData(): void {
         try { data[key] = JSON.parse(raw) } catch { data[key] = raw }
       }
     }
-    const backup: MusicanaBackup = {
+    const backup: MusicanazBackup = {
       version:    1,
       exportedAt: Date.now(),
       data,
@@ -732,7 +732,7 @@ export function exportAllData(): void {
     const a    = document.createElement("a")
     const date = new Date().toISOString().slice(0, 10)
     a.href     = url
-    a.download = `musicana-backup-${date}.json`
+    a.download = `musicanaz-backup-${date}.json`
     a.click()
     URL.revokeObjectURL(url)
   } catch (e) { console.error("Export failed:", e) }
@@ -744,7 +744,7 @@ export function importAllData(
 ): { ok: boolean; error?: string; keysRestored: number } {
   if (typeof window === "undefined") return { ok: false, error: "Not in browser", keysRestored: 0 }
   try {
-    const backup: MusicanaBackup = JSON.parse(json)
+    const backup: MusicanazBackup = JSON.parse(json)
     if (!backup?.data || typeof backup.data !== "object") {
       return { ok: false, error: "Invalid backup file format", keysRestored: 0 }
     }
@@ -942,7 +942,7 @@ export const ALL_BADGES: Badge[] = [
   b("playlist_10", "Playlist Architect","Create 10 playlists",          "📋", "uncommon", "behavior"),
   b("heatmap_25",  "Heatmap Hero",      "Active 25 days in one month",  "🗓️", "uncommon", "behavior"),
   b("silent_week", "Silent Week",       "Return after 7 days inactive", "🔔", "epic",     "behavior"),
-  b("royalty",     "Musicana Royalty",  "Unlock 25 total badges",       "👑", "rare",     "behavior"),
+  b("royalty",     "Musicanaz Royalty",  "Unlock 25 total badges",       "👑", "rare",     "behavior"),
 ]
 
 // ── Streak helpers ─────────────────────────────────────────────

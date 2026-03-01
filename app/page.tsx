@@ -400,7 +400,7 @@ function PWAInstallBanner() {
       <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-primary text-primary-foreground shadow-xl shadow-primary/30">
         <ImageWithFallback src="https://raw.githubusercontent.com/wilooper/Asset/main/logo.png" alt="" className="w-9 h-9 rounded-xl flex-shrink-0" />
         <div className="flex-1 min-w-0">
-          <p className="font-semibold text-sm">Install MUSICANA</p>
+          <p className="font-semibold text-sm">Install Musicanaz</p>
           <p className="text-xs opacity-80">Add to your home screen</p>
         </div>
         <button onClick={install} className="px-3 py-1.5 rounded-xl bg-primary-foreground text-primary text-xs font-bold flex-shrink-0">Install</button>
@@ -711,8 +711,8 @@ export default function HomePage() {
         {/* ── Header ── */}
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-2.5">
-            <ImageWithFallback src="https://raw.githubusercontent.com/wilooper/Asset/main/logo.png" alt="Musicana" className="w-10 h-10 rounded-xl object-contain flex-shrink-0" />
-            <h1 className="text-xl font-bold tracking-tight">MUSICANA</h1>
+            <ImageWithFallback src="https://raw.githubusercontent.com/wilooper/Asset/main/logo.png" alt="Musicanaz" className="w-10 h-10 rounded-xl object-contain flex-shrink-0" />
+            <h1 className="text-xl font-bold tracking-tight">Musicanaz</h1>
           </div>
           <div className="flex items-center gap-1">
             <Button variant="ghost" size="sm" onClick={() => router.push("/moods")} className="rounded-full px-3 gap-1">
