@@ -51,4 +51,4 @@ We welcome contributions to Musicanaz! Here’s how you can help:
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
 ### Contact
-For any inquiries, please contact the project maintainer at [Wilooper@gmail.com].
+For any inquiries, please contact the project maintainer at [thinkelyorg@gmail.com].
