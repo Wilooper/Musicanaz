@@ -75,7 +75,7 @@ function AllSongsPanel({
 
   useEffect(() => {
     setLoading(true)
-    fetch(`/api/musiva/artist-songs?id=${encodeURIComponent(artistId)}&limit=100`)
+    fetch(`/api/musiva/artist-songs?id=${encodeURIComponent(artistId)}&limit=500`)
       .then(r => r.json())
       .then(d => { setSongs(d.songs || []); setLoading(false) })
       .catch(() => setLoading(false))
