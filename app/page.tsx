@@ -79,9 +79,11 @@ function convertToSong(track: any): Song {
 async function resolveVideoId(title: string, artist: string): Promise<string> {
   try {
     const q = `${title} ${artist}`.trim()
-    const data = await fetch(
+    const res = await fetch(
       `/api/musiva/search?q=${encodeURIComponent(q)}&filter=songs&limit=1`
-    ).then(r => r.json())
+    )
+    if (!res.ok) return ""
+    const data = await res.json()
     return data.results?.[0]?.videoId || ""
   } catch {
     return ""

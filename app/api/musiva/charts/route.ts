@@ -20,7 +20,7 @@ function mapDeezerArtist(a: any) {
   return {
     name:           a.name || "Unknown",
     thumbnail:      a.picture_big || a.picture_medium || a.picture || "",
-    browseId:       null,
+    browseId:       "",
     _deezerArtist:  true,
   }
 }

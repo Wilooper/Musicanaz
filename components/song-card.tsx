@@ -28,16 +28,19 @@ export default function SongCard({ song, onPlayComplete }: SongCardProps) {
       setResolving(true)
       try {
         const q = `${song.title} ${song.artist}`.trim()
-        const data = await fetch(
+        const res = await fetch(
           `/api/musiva/search?q=${encodeURIComponent(q)}&filter=songs&limit=1`
-        ).then(r => r.json())
-        const result = data.results?.[0]
-        if (result?.videoId) {
-          songToPlay = {
-            ...song,
-            id:        result.videoId,
-            videoId:   result.videoId,
-            thumbnail: song.thumbnail || result.thumbnail || "",
+        )
+        if (res.ok) {
+          const data = await res.json()
+          const result = data.results?.[0]
+          if (result?.videoId) {
+            songToPlay = {
+              ...song,
+              id:        result.videoId,
+              videoId:   result.videoId,
+              thumbnail: song.thumbnail || result.thumbnail || "",
+            }
           }
         }
       } catch {
