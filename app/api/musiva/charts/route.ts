@@ -1,24 +1,46 @@
-import { type NextRequest, NextResponse } from "next/server"
-const BASE = "https://turbo-14uz.onrender.com"
+import { NextResponse } from "next/server"
 
-export async function GET(request: NextRequest) {
+const DEEZER_CHART = "https://api.deezer.com/chart"
+
+function mapDeezerTrack(t: any) {
+  return {
+    videoId:       "",
+    title:         t.title  || t.title_short || "Unknown",
+    artist:        t.artist?.name || "Unknown",
+    thumbnail:     t.album?.cover_big || t.album?.cover_medium || t.album?.cover || "",
+    duration:      t.duration ? `${Math.floor(t.duration / 60)}:${String(t.duration % 60).padStart(2, "0")}` : "",
+    album:         t.album?.title || "",
+    _deezerTitle:  t.title  || t.title_short || "",
+    _deezerArtist: t.artist?.name || "",
+    _deezer:       true,
+  }
+}
+
+function mapDeezerArtist(a: any) {
+  return {
+    name:           a.name || "Unknown",
+    thumbnail:      a.picture_big || a.picture_medium || a.picture || "",
+    browseId:       "",
+    _deezerArtist:  true,
+  }
+}
+
+export async function GET() {
   try {
-    const country = request.nextUrl.searchParams.get("country") || "ZZ"
-    const controller = new AbortController()
-    const tid = setTimeout(() => controller.abort(), 15000)
-    const res = await fetch(`${BASE}/charts?country=${country}`, { signal: controller.signal, next: { revalidate: 600 } })
-    clearTimeout(tid)
-    if (!res.ok) throw new Error(`${res.status}`)
+    const res = await fetch(DEEZER_CHART, { next: { revalidate: 600 } })
+    if (!res.ok) throw new Error(`Deezer returned ${res.status}`)
     const data = await res.json()
-    // New backend returns { songs:[], videos:[], artists:[], trending:[] }
-    // Each item already normalised with thumbnail string at top level
+
+    const songs    = (data.tracks?.data  || []).map(mapDeezerTrack)
+    const artists  = (data.artists?.data || []).map(mapDeezerArtist)
+
     return NextResponse.json({
-      songs:    Array.isArray(data.songs)    ? data.songs    : [],
-      videos:   Array.isArray(data.videos)   ? data.videos   : [],
-      artists:  Array.isArray(data.artists)  ? data.artists  : [],
-      trending: Array.isArray(data.trending) ? data.trending : [],
+      songs,
+      videos:   [],
+      artists,
+      trending: songs,
     })
-  } catch (e) {
+  } catch {
     return NextResponse.json({ songs: [], videos: [], artists: [], trending: [] })
   }
 }
