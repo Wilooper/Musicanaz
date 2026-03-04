@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 
-const TRENDING_BASE = "https://test-0k.onrender.com"
+const BASE = "https://turbo-14uz.onrender.com"
 
 // Country metadata for display
 export const TRENDING_COUNTRIES: Record<string, { flag: string; name: string }> = {
@@ -21,19 +21,58 @@ export const TRENDING_COUNTRIES: Record<string, { flag: string; name: string }> 
   ID: { flag: "🇮🇩", name: "Indonesia" },
 }
 
-async function fetchCountry(country: string, limit: number) {
-  const res = await fetch(
-    `${TRENDING_BASE}/trending/?country=${country}&limit=${limit}`,
-    { next: { revalidate: 600 } }
-  )
-  if (!res.ok) return []
-  const json = await res.json()
-  // API returns { status, data: { country, trending: [...] } }
-  const tracks = json?.data?.trending || json?.trending || []
-  return tracks.map((t: any) => ({
-    ...t,
-    _country: country, // tag with source country for global mix
-  }))
+async function fetchCountryTrending(country: string, limit: number) {
+  try {
+    const res = await fetch(
+      `${BASE}/trending?country=${country}&limit=${limit}`,
+      { next: { revalidate: 600 } }
+    )
+    if (!res.ok) return []
+    const json = await res.json()
+    // mpyapi /trending returns { country, trending: [...], count }
+    const tracks = json?.trending || []
+    return tracks.map((t: any) => ({
+      ...t,
+      // Ensure consistent fields for the frontend
+      videoId:   t.videoId   || "",
+      title:     t.title     || "Unknown",
+      artist:    Array.isArray(t.artists)
+        ? t.artists.map((a: any) => (typeof a === "string" ? a : a?.name)).filter(Boolean).join(", ")
+        : (t.artist || "Unknown"),
+      thumbnail: t.thumbnail || t.thumbnails?.[0]?.url || "",
+      duration:  t.duration  || "",
+      _country:  country,
+    }))
+  } catch {
+    return []
+  }
+}
+
+async function fetchCountryCharts(country: string, limit: number) {
+  try {
+    const res = await fetch(
+      `${BASE}/charts?country=${country}`,
+      { next: { revalidate: 600 } }
+    )
+    if (!res.ok) return []
+    const json = await res.json()
+    // mpyapi /charts returns { songs:[], trending:[], videos:[], artists:[] }
+    // Use trending first, fall back to songs
+    const tracks = json?.trending || json?.songs || []
+    return tracks.slice(0, limit).map((t: any) => ({
+      ...t,
+      videoId:   t.videoId   || "",
+      title:     t.title     || "Unknown",
+      artist:    Array.isArray(t.artists)
+        ? t.artists.map((a: any) => (typeof a === "string" ? a : a?.name)).filter(Boolean).join(", ")
+        : (t.artist || "Unknown"),
+      thumbnail: t.thumbnail || t.thumbnails?.[0]?.url || "",
+      duration:  t.duration  || "",
+      _country:  country,
+    }))
+  } catch {
+    return []
+  }
 }
 
 export async function GET(request: NextRequest) {
@@ -44,17 +83,23 @@ export async function GET(request: NextRequest) {
 
   try {
     if (multi || !country || country === "ZZ") {
-      // Global mix: US + GB + IN
+      // Global mix: fetch from multiple countries
       const countries = ["US", "GB", "IN"]
       const perCountry = Math.ceil(limit / countries.length) || 7
 
+      // Try /trending first, fall back to /charts for each country
       const results = await Promise.allSettled(
-        countries.map(c => fetchCountry(c, perCountry))
+        countries.map(async (c) => {
+          const trending = await fetchCountryTrending(c, perCountry)
+          if (trending.length > 0) return trending
+          // Fallback to charts if trending is empty
+          return fetchCountryCharts(c, perCountry)
+        })
       )
 
       // Interleave: 1 from each country in rotation for variety
       const lists = results.map(r => (r.status === "fulfilled" ? r.value : []))
-      const maxLen = Math.max(...lists.map(l => l.length))
+      const maxLen = Math.max(...lists.map(l => l.length), 0)
       const merged: any[] = []
       for (let i = 0; i < maxLen; i++) {
         for (const list of lists) {
@@ -62,10 +107,12 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      // Deduplicate by song title + artist (no videoId on trending API)
+      // Deduplicate by videoId, then by title+artist
       const seen = new Set<string>()
       const deduped = merged.filter(t => {
-        const key = `${t.title}||${t.artist}`.toLowerCase()
+        const key = t.videoId
+          ? `vid:${t.videoId}`
+          : `${t.title}||${t.artist}`.toLowerCase()
         if (seen.has(key)) return false
         seen.add(key)
         return true
@@ -73,17 +120,21 @@ export async function GET(request: NextRequest) {
 
       return NextResponse.json({
         trending: deduped.slice(0, limit),
-        count: deduped.length,
-        source: "global",
+        count:    deduped.length,
+        source:   "global",
       })
     }
 
-    // Single country
-    const tracks = await fetchCountry(country, limit)
+    // Single country — try /trending, fall back to /charts
+    let tracks = await fetchCountryTrending(country, limit)
+    if (tracks.length === 0) {
+      tracks = await fetchCountryCharts(country, limit)
+    }
+
     return NextResponse.json({
-      trending: tracks,
-      count: tracks.length,
-      source: country,
+      trending: tracks.slice(0, limit),
+      count:    tracks.length,
+      source:   country,
     })
   } catch {
     return NextResponse.json({ trending: [], count: 0, source: "error" })
