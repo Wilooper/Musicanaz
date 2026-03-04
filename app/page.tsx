@@ -57,15 +57,34 @@ function toArtistStr(artists: any): string {
 }
 
 function convertToSong(track: any): Song {
+  // Handle Deezer tracks where artist is an object { name, ... }
+  const artistStr = typeof track.artist === "string"
+    ? track.artist
+    : track.artist?.name
+      ? track.artist.name
+      : toArtistStr(track.artists)
   return {
     id:        track.videoId || track.id || "",
     title:     track.title  || "Unknown",
-    artist:    toArtistStr(track.artists),
+    artist:    artistStr,
     thumbnail: getBestThumbnail(track.thumbnails, track.thumbnail),
     type:      "musiva",
     videoId:   track.videoId || "",
-    album:     typeof track.album === "string" ? track.album : track.album?.name || "",
+    album:     typeof track.album === "string" ? track.album : track.album?.name || track.album?.title || "",
     duration:  track.duration || "",
+  }
+}
+
+/** Resolve a YouTube videoId by reverse-searching title + artist on the backend */
+async function resolveVideoId(title: string, artist: string): Promise<string> {
+  try {
+    const q = `${title} ${artist}`.trim()
+    const data = await fetch(
+      `/api/musiva/search?q=${encodeURIComponent(q)}&filter=songs&limit=1`
+    ).then(r => r.json())
+    return data.results?.[0]?.videoId || ""
+  } catch {
+    return ""
   }
 }
 
@@ -247,10 +266,27 @@ const TRENDING_COUNTRIES = [
 /* ─── TrendingCard with rank badge ──────────────────── */
 function TrendingCard({ item, rank }: { item: any; rank: number }) {
   const { playSong } = useAudio()
+  const [resolving, setResolving] = useState(false)
   const song = convertToSong(item)
+
+  const handlePlay = async () => {
+    if (resolving) return
+    if (song.videoId) {
+      playSong(song)
+      return
+    }
+    // Deezer track — reverse-search backend by title + artist to get YouTube videoId
+    setResolving(true)
+    const videoId = await resolveVideoId(song.title, song.artist)
+    setResolving(false)
+    if (videoId) {
+      playSong({ ...song, id: videoId, videoId })
+    }
+  }
+
   return (
     <div
-      onClick={() => playSong(song)}
+      onClick={handlePlay}
       className="group cursor-pointer bg-card/30 rounded-2xl p-3 hover:bg-card/60 hover:scale-105 transition-all border border-border/20 relative"
     >
       <div className="aspect-square rounded-xl overflow-hidden bg-muted mb-3 relative">
@@ -274,9 +310,13 @@ function TrendingCard({ item, rank }: { item: any; rank: number }) {
         </div>
         {/* Play overlay */}
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 flex items-center justify-center transition-all">
-          <div className="opacity-0 group-hover:opacity-100 w-9 h-9 rounded-full bg-white/90 flex items-center justify-center transition-all scale-90 group-hover:scale-100">
-            <Play className="w-4 h-4 text-black fill-black ml-0.5" />
-          </div>
+          {resolving ? (
+            <Loader2 className="w-8 h-8 text-white animate-spin" />
+          ) : (
+            <div className="opacity-0 group-hover:opacity-100 w-9 h-9 rounded-full bg-white/90 flex items-center justify-center transition-all scale-90 group-hover:scale-100">
+              <Play className="w-4 h-4 text-black fill-black ml-0.5" />
+            </div>
+          )}
         </div>
       </div>
       <p className="font-semibold text-xs truncate">{song.title}</p>

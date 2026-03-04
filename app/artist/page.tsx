@@ -27,13 +27,18 @@ function toArtistStr(a: any): string {
   return "Unknown"
 }
 function toSong(item: any) {
+  const videoId = item.videoId || ""
+  const thumb =
+    item.thumbnail ||
+    getBestThumb(item.thumbnails || []) ||
+    (videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : "")
   return {
-    id:        item.videoId || "",
+    id:        videoId,
     title:     item.title  || "Unknown",
     artist:    toArtistStr(item.artists),
-    thumbnail: item.thumbnail || getBestThumb(item.thumbnails || []),
+    thumbnail: thumb,
     type:      "musiva" as const,
-    videoId:   item.videoId || "",
+    videoId,
     duration:  item.duration || "",
   }
 }

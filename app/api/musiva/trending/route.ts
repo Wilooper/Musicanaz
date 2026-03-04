@@ -1,8 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server"
 
-const BASE = "https://turbo-14uz.onrender.com"
+const DEEZER_CHART = "https://api.deezer.com/chart/0/tracks"
 
-// Country metadata for display
+// Country metadata for display (kept for frontend pill compatibility)
 export const TRENDING_COUNTRIES: Record<string, { flag: string; name: string }> = {
   US: { flag: "🇺🇸", name: "United States" },
   GB: { flag: "🇬🇧", name: "United Kingdom" },
@@ -21,120 +21,37 @@ export const TRENDING_COUNTRIES: Record<string, { flag: string; name: string }> 
   ID: { flag: "🇮🇩", name: "Indonesia" },
 }
 
-async function fetchCountryTrending(country: string, limit: number) {
-  try {
-    const res = await fetch(
-      `${BASE}/trending?country=${country}&limit=${limit}`,
-      { next: { revalidate: 600 } }
-    )
-    if (!res.ok) return []
-    const json = await res.json()
-    // mpyapi /trending returns { country, trending: [...], count }
-    const tracks = json?.trending || []
-    return tracks.map((t: any) => ({
-      ...t,
-      // Ensure consistent fields for the frontend
-      videoId:   t.videoId   || "",
-      title:     t.title     || "Unknown",
-      artist:    Array.isArray(t.artists)
-        ? t.artists.map((a: any) => (typeof a === "string" ? a : a?.name)).filter(Boolean).join(", ")
-        : (t.artist || "Unknown"),
-      thumbnail: t.thumbnail || t.thumbnails?.[0]?.url || "",
-      duration:  t.duration  || "",
-      _country:  country,
-    }))
-  } catch {
-    return []
-  }
-}
-
-async function fetchCountryCharts(country: string, limit: number) {
-  try {
-    const res = await fetch(
-      `${BASE}/charts?country=${country}`,
-      { next: { revalidate: 600 } }
-    )
-    if (!res.ok) return []
-    const json = await res.json()
-    // mpyapi /charts returns { songs:[], trending:[], videos:[], artists:[] }
-    // Use trending first, fall back to songs
-    const tracks = json?.trending || json?.songs || []
-    return tracks.slice(0, limit).map((t: any) => ({
-      ...t,
-      videoId:   t.videoId   || "",
-      title:     t.title     || "Unknown",
-      artist:    Array.isArray(t.artists)
-        ? t.artists.map((a: any) => (typeof a === "string" ? a : a?.name)).filter(Boolean).join(", ")
-        : (t.artist || "Unknown"),
-      thumbnail: t.thumbnail || t.thumbnails?.[0]?.url || "",
-      duration:  t.duration  || "",
-      _country:  country,
-    }))
-  } catch {
-    return []
+function mapDeezerTrack(t: any) {
+  return {
+    videoId:       "",
+    title:         t.title  || t.title_short || "Unknown",
+    artist:        t.artist?.name || "Unknown",
+    thumbnail:     t.album?.cover_big || t.album?.cover_medium || t.album?.cover || "",
+    duration:      t.duration ? `${Math.floor(t.duration / 60)}:${String(t.duration % 60).padStart(2, "0")}` : "",
+    album:         t.album?.title || "",
+    _deezerTitle:  t.title  || t.title_short || "",
+    _deezerArtist: t.artist?.name || "",
+    _deezer:       true,
   }
 }
 
 export async function GET(request: NextRequest) {
-  const sp      = request.nextUrl.searchParams
-  const country = sp.get("country") || ""
-  const limit   = Number(sp.get("limit") || "20")
-  const multi   = sp.get("multi") === "1"
+  const sp    = request.nextUrl.searchParams
+  const limit = Math.min(Number(sp.get("limit") || "20"), 50)
 
   try {
-    if (multi || !country || country === "ZZ") {
-      // Global mix: fetch from multiple countries
-      const countries = ["US", "GB", "IN"]
-      const perCountry = Math.ceil(limit / countries.length) || 7
+    const res = await fetch(`${DEEZER_CHART}?limit=${limit}`, {
+      next: { revalidate: 600 },
+    })
+    if (!res.ok) throw new Error(`Deezer returned ${res.status}`)
+    const data = await res.json()
 
-      // Try /trending first, fall back to /charts for each country
-      const results = await Promise.allSettled(
-        countries.map(async (c) => {
-          const trending = await fetchCountryTrending(c, perCountry)
-          if (trending.length > 0) return trending
-          // Fallback to charts if trending is empty
-          return fetchCountryCharts(c, perCountry)
-        })
-      )
-
-      // Interleave: 1 from each country in rotation for variety
-      const lists = results.map(r => (r.status === "fulfilled" ? r.value : []))
-      const maxLen = Math.max(...lists.map(l => l.length), 0)
-      const merged: any[] = []
-      for (let i = 0; i < maxLen; i++) {
-        for (const list of lists) {
-          if (list[i]) merged.push(list[i])
-        }
-      }
-
-      // Deduplicate by videoId, then by title+artist
-      const seen = new Set<string>()
-      const deduped = merged.filter(t => {
-        const key = t.videoId
-          ? `vid:${t.videoId}`
-          : `${t.title}||${t.artist}`.toLowerCase()
-        if (seen.has(key)) return false
-        seen.add(key)
-        return true
-      })
-
-      return NextResponse.json({
-        trending: deduped.slice(0, limit),
-        count:    deduped.length,
-        source:   "global",
-      })
-    }
-
-    // Single country — try /trending, fall back to /charts
-    let tracks = await fetchCountryTrending(country, limit)
-    if (tracks.length === 0) {
-      tracks = await fetchCountryCharts(country, limit)
-    }
+    const tracks = (data.data || []).slice(0, limit).map(mapDeezerTrack)
 
     return NextResponse.json({
-      trending: tracks.slice(0, limit),
+      trending: tracks,
       count:    tracks.length,
-      source:   country,
+      source:   "deezer",
     })
   } catch {
     return NextResponse.json({ trending: [], count: 0, source: "error" })

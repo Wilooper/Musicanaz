@@ -1,2 +1,6 @@
 .vercel
+node_modules
+.next
+package-lock.json
+tsconfig.tsbuildinfo
 

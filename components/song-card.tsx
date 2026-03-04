@@ -1,7 +1,8 @@
 "use client"
 
+import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { Play } from "lucide-react"
+import { Play, Loader2 } from "lucide-react"
 import type { Song } from "@/lib/types"
 import { useAudio } from "@/lib/audio-context"
 import ImageWithFallback from "./image-with-fallback"
@@ -15,20 +16,50 @@ interface SongCardProps {
 export default function SongCard({ song, onPlayComplete }: SongCardProps) {
   const router = useRouter()
   const { playSong } = useAudio()
+  const [resolving, setResolving] = useState(false)
 
-  const handlePlay = () => {
-    playSong(song)
-    addToRecentlyPlayed(song)
+  const handlePlay = async () => {
+    if (resolving) return
+
+    let songToPlay = song
+
+    // Reverse-search by title + artist when videoId is missing (e.g. Deezer tracks)
+    if (!song.videoId && song.title && song.artist) {
+      setResolving(true)
+      try {
+        const q = `${song.title} ${song.artist}`.trim()
+        const data = await fetch(
+          `/api/musiva/search?q=${encodeURIComponent(q)}&filter=songs&limit=1`
+        ).then(r => r.json())
+        const result = data.results?.[0]
+        if (result?.videoId) {
+          songToPlay = {
+            ...song,
+            id:        result.videoId,
+            videoId:   result.videoId,
+            thumbnail: song.thumbnail || result.thumbnail || "",
+          }
+        }
+      } catch {
+        // fall through with original song
+      } finally {
+        setResolving(false)
+      }
+    }
+
+    if (!songToPlay.videoId) return   // still no videoId — cannot play
+
+    playSong(songToPlay)
+    addToRecentlyPlayed(songToPlay)
     if (onPlayComplete) onPlayComplete()
 
     const params = new URLSearchParams({
-      id: song.id,
-      title: song.title,
-      artist: song.artist,
-      thumbnail: song.thumbnail,
-      type: song.type,
-      // Always pass videoId so the player can use it for YT embed
-      videoId: song.videoId || song.id,
+      id:        songToPlay.id,
+      title:     songToPlay.title,
+      artist:    songToPlay.artist,
+      thumbnail: songToPlay.thumbnail,
+      type:      songToPlay.type,
+      videoId:   songToPlay.videoId || songToPlay.id,
     })
     router.push(`/player?${params.toString()}`)
   }
@@ -53,7 +84,11 @@ export default function SongCard({ song, onPlayComplete }: SongCardProps) {
         />
         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
           <div className="w-14 h-14 bg-primary rounded-full flex items-center justify-center">
-            <Play className="w-6 h-6 text-primary-foreground ml-1" fill="currentColor" />
+            {resolving ? (
+              <Loader2 className="w-6 h-6 text-primary-foreground animate-spin" />
+            ) : (
+              <Play className="w-6 h-6 text-primary-foreground ml-1" fill="currentColor" />
+            )}
           </div>
         </div>
       </div>
