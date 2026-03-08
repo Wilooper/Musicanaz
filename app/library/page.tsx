@@ -123,7 +123,7 @@ export default function LibraryPage() {
 
         {/* Header */}
         <div className="flex items-center gap-3 mb-6">
-          <Button variant="ghost" size="icon" onClick={() => router.push("/")} className="rounded-full">
+          <Button variant="ghost" size="icon" onClick={() => router.back()} className="rounded-full">
             <ChevronLeft className="w-5 h-5" />
           </Button>
           <h1 className="text-2xl font-bold">Your Library</h1>

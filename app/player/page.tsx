@@ -759,7 +759,7 @@ function PlayerContent() {
         <div className="flex items-center justify-between px-4 pt-4 pb-1 flex-shrink-0">
           <Button
             variant="ghost" size="icon"
-            onClick={() => router.push("/")}
+            onClick={() => router.back()}
             className="rounded-full w-10 h-10 bg-black/20 backdrop-blur-md border border-white/10"
           >
             <ChevronDown className="w-5 h-5" />
