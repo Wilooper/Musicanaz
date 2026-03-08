@@ -1163,3 +1163,123 @@ export function getXPLevel(xp: number): { level: number; title: string; nextAt: 
   }
   return thresholds[thresholds.length - 1]
 }
+
+// ─── Top Artists ──────────────────────────────────────────────
+
+export interface TopArtist {
+  artist: string
+  thumbnail: string
+  plays: number
+  listenSeconds: number
+  songCount: number
+}
+
+// Helper to parse duration string like "3:45" to seconds
+function parseDuration(dur: string): number {
+  if (!dur) return 180
+  const parts = dur.split(":").map(Number)
+  if (parts.length === 2) return (parts[0] || 0) * 60 + (parts[1] || 0)
+  if (parts.length === 3) return (parts[0] || 0) * 3600 + (parts[1] || 0) * 60 + (parts[2] || 0)
+  const n = parseInt(dur, 10)
+  return isNaN(n) ? 180 : n
+}
+
+/**
+ * Returns top artists by play count within a time window.
+ */
+export function getTopArtists(period: "day" | "week" | "month", limit = 5): TopArtist[] {
+  const history = getSongHistory()
+  const now = Date.now()
+  const cutoff = period === "day" ? now - 86_400_000
+               : period === "week" ? now - 7 * 86_400_000
+               : now - 30 * 86_400_000
+
+  const artistMap = new Map<string, {
+    artist: string
+    plays: number
+    songs: Map<string, { song: Song; plays: number }>
+  }>()
+
+  for (const e of history) {
+    if (e.playedAt < cutoff) continue
+    const artistName = e.song.artist
+    if (!artistName) continue
+
+    if (!artistMap.has(artistName)) {
+      artistMap.set(artistName, { artist: artistName, plays: 0, songs: new Map() })
+    }
+    const entry = artistMap.get(artistName)!
+    entry.plays++
+
+    if (!entry.songs.has(e.song.id)) {
+      entry.songs.set(e.song.id, { song: e.song, plays: 0 })
+    }
+    entry.songs.get(e.song.id)!.plays++
+  }
+
+  return [...artistMap.values()]
+    .map(a => {
+      const songsArr = [...a.songs.values()]
+      const bestSong = songsArr.sort((x, y) => y.plays - x.plays)[0]
+      const listenSeconds = songsArr.reduce((sum, s) => {
+        const dur = s.song.duration ? parseDuration(s.song.duration) : 180
+        return sum + s.plays * dur
+      }, 0)
+      return {
+        artist: a.artist,
+        thumbnail: bestSong?.song.thumbnail || "",
+        plays: a.plays,
+        listenSeconds: Math.round(listenSeconds),
+        songCount: a.songs.size,
+      }
+    })
+    .sort((a, b) => b.plays - a.plays)
+    .slice(0, limit)
+}
+
+/**
+ * Returns all-time top artists (no time window cutoff).
+ */
+export function getAllTimeTopArtists(limit = 10): TopArtist[] {
+  const history = getSongHistory()
+  const artistMap = new Map<string, {
+    artist: string
+    plays: number
+    songs: Map<string, { song: Song; plays: number }>
+  }>()
+
+  for (const e of history) {
+    const artistName = e.song.artist
+    if (!artistName) continue
+
+    if (!artistMap.has(artistName)) {
+      artistMap.set(artistName, { artist: artistName, plays: 0, songs: new Map() })
+    }
+    const entry = artistMap.get(artistName)!
+    entry.plays++
+
+    if (!entry.songs.has(e.song.id)) {
+      entry.songs.set(e.song.id, { song: e.song, plays: 0 })
+    }
+    entry.songs.get(e.song.id)!.plays++
+  }
+
+  return [...artistMap.values()]
+    .map(a => {
+      const songsArr = [...a.songs.values()]
+      const bestSong = songsArr.sort((x, y) => y.plays - x.plays)[0]
+      const listenSeconds = songsArr.reduce((sum, s) => {
+        const dur = s.song.duration ? parseDuration(s.song.duration) : 180
+        return sum + s.plays * dur
+      }, 0)
+      return {
+        artist: a.artist,
+        thumbnail: bestSong?.song.thumbnail || "",
+        plays: a.plays,
+        listenSeconds: Math.round(listenSeconds),
+        songCount: a.songs.size,
+      }
+    })
+    .sort((a, b) => b.plays - a.plays)
+    .slice(0, limit)
+}

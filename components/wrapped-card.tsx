@@ -10,11 +10,12 @@ import {
   getPartyUsername,
   getEarnedBadges, getTotalXP, getXPLevel,
   type BadgeStatus, type BadgeTier,
+  getAllTimeTopArtists, type TopArtist,
 } from "@/lib/storage"
 
 /* ── canvas helpers ────────────────────────────────────────── */
 const W = 900
-const H = 1600
+const H = 2000
 
 function loadImg(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -132,6 +133,7 @@ function drawFooter(ctx: CanvasRenderingContext2D) {
 async function renderStats(
   canvas: HTMLCanvasElement,
   top: TopSong[], heat: HeatmapDay[], totalSecs: number, username: string,
+  topArtists: TopArtist[],
 ) {
   const ctx = canvas.getContext("2d")!
   canvas.width  = W
@@ -254,6 +256,55 @@ async function renderStats(
       ctx.font = "700 22px system-ui, -apple-system, sans-serif"
       ctx.fillStyle = "rgba(129,140,248,0.90)"; ctx.textAlign = "right"
       ctx.fillText(`${entry.plays}×`, W - PAD - 20, y + rowH / 2 + 10); ctx.textAlign = "left"
+      y += rowH
+    }
+  }
+  // Top Artists
+  if (topArtists.length) {
+    y += 28
+    ctx.font      = "700 28px system-ui, -apple-system, sans-serif"
+    ctx.fillStyle = "rgba(255,255,255,0.65)"
+    ctx.fillText("🎤  Top Artists", PAD, y)
+    y += 22
+    const rowH = 88
+    const RANK_COLORS = ["#facc15", "#d1d5db", "#fb923c", "#818cf8", "#818cf8"]
+    for (let i = 0; i < topArtists.length; i++) {
+      const artist = topArtists[i]
+      roundRect(ctx, PAD, y, W - PAD * 2, rowH - 6, 18)
+      ctx.fillStyle = i === 0 ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.03)"; ctx.fill()
+      // Circular thumbnail
+      const ts = 58
+      const tx = PAD + 70
+      const ty = y + (rowH - 6 - ts) / 2
+      let img: HTMLImageElement | null = null
+      try { img = artist.thumbnail ? await loadImg(proxyThumb(artist.thumbnail, 100)) : null } catch {}
+      ctx.save()
+      ctx.beginPath()
+      ctx.arc(tx + ts / 2, ty + ts / 2, ts / 2, 0, Math.PI * 2)
+      ctx.clip()
+      if (img) {
+        const scale = Math.max(ts / img.width, ts / img.height)
+        const sw = img.width * scale
+        const sh = img.height * scale
+        ctx.drawImage(img, tx + (ts - sw) / 2, ty + (ts - sh) / 2, sw, sh)
+      } else {
+        ctx.fillStyle = "rgba(255,255,255,0.08)"
+        ctx.fill()
+      }
+      ctx.restore()
+      ctx.font = `800 ${i < 3 ? 32 : 26}px system-ui, -apple-system, sans-serif`
+      ctx.fillStyle = RANK_COLORS[i]; ctx.textAlign = "center"
+      ctx.fillText(`${i + 1}`, PAD + 36, y + rowH / 2 + 10); ctx.textAlign = "left"
+      const infoX = PAD + 70 + ts + 20; const maxW = W - PAD - infoX - 120
+      ctx.font = "600 24px system-ui, -apple-system, sans-serif"; ctx.fillStyle = "rgba(255,255,255,0.92)"
+      let name = artist.artist
+      while (name.length > 3 && ctx.measureText(name).width > maxW) name = name.slice(0, -4) + "…"
+      ctx.fillText(name, infoX, y + rowH / 2 - 4)
+      ctx.font = "500 20px system-ui, -apple-system, sans-serif"; ctx.fillStyle = "rgba(255,255,255,0.40)"
+      ctx.fillText(`${fmtListenTime(artist.listenSeconds)} listened`, infoX, y + rowH / 2 + 26)
+      ctx.font = "700 22px system-ui, -apple-system, sans-serif"
+      ctx.fillStyle = "rgba(129,140,248,0.90)"; ctx.textAlign = "right"
+      ctx.fillText(`${artist.plays}×`, W - PAD - 20, y + rowH / 2 + 10); ctx.textAlign = "left"
       y += rowH
     }
   }
@@ -429,10 +480,11 @@ export default function WrappedCard({ onClose }: WrappedCardProps) {
     try {
       const username = getPartyUsername()
       if (m === "stats") {
-        const top       = getAllTimeTopSongs(5)
-        const heat      = getHeatmapData()
-        const totalSecs = getAllTimeListenSeconds()
-        await renderStats(canvas, top, heat, totalSecs, username)
+        const top        = getAllTimeTopSongs(5)
+        const heat       = getHeatmapData()
+        const totalSecs  = getAllTimeListenSeconds()
+        const topArtists = getAllTimeTopArtists(3)
+        await renderStats(canvas, top, heat, totalSecs, username, topArtists)
       } else {
         const earned = getEarnedBadges()
         const xp     = getTotalXP()

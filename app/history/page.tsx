@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import {
   ChevronLeft, Clock, Music, Trash2, Play,
   Search, BarChart2, Calendar, Flame, Trophy,
-  TrendingUp, Star, Sparkles, Shield, Zap,
+  TrendingUp, Star, Sparkles, Shield, Zap, Users,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import ImageWithFallback from "@/components/image-with-fallback"
@@ -15,6 +15,7 @@ import {
   getTodayListenSeconds, getMonthListenSeconds, getAllTimeListenSeconds,
   getWeekListenData, fmtListenTime, getHeatmapData, type HeatmapDay,
   evaluateBadges, getTotalXP, getXPLevel, type BadgeStatus, type BadgeTier,
+  getTopArtists, getAllTimeTopArtists, type TopArtist,
 } from "@/lib/storage"
 import { useAudio } from "@/lib/audio-context"
 import dynamic from "next/dynamic"
@@ -178,6 +179,48 @@ function TopSongsSection({ title, icon, songs, onPlay, iconBg }: {
   )
 }
 
+function TopArtistsSection({ title, icon, artists, iconBg }: {
+  title: string; icon: React.ReactNode; artists: TopArtist[]; iconBg: string
+}) {
+  if (!artists.length) return null
+  const medals = ["🥇", "🥈", "🥉"]
+  return (
+    <div className="rounded-2xl bg-card/40 border border-border/30 overflow-hidden">
+      <div className={`flex items-center gap-2.5 px-4 py-3 border-b border-border/20 ${iconBg}`}>
+        <div className="w-7 h-7 rounded-lg bg-background/30 flex items-center justify-center flex-shrink-0">{icon}</div>
+        <span className="font-semibold text-sm">{title}</span>
+        <span className="ml-auto text-xs text-muted-foreground">{artists.length} artist{artists.length !== 1 ? "s" : ""}</span>
+      </div>
+      <div className="divide-y divide-border/10">
+        {artists.map((artist, i) => (
+          <div key={artist.artist}
+            className="flex items-center gap-3 px-4 py-3">
+            <span className="text-base w-6 text-center flex-shrink-0 leading-none">
+              {medals[i] ?? <span className="text-xs font-bold text-muted-foreground">#{i + 1}</span>}
+            </span>
+            <div className="relative w-10 h-10 rounded-full overflow-hidden bg-muted flex-shrink-0">
+              <ImageWithFallback src={artist.thumbnail} alt={artist.artist} className="w-full h-full object-cover"
+                fallback={<div className="w-full h-full flex items-center justify-center bg-muted"><Users className="w-4 h-4 text-muted-foreground" /></div>} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-sm truncate leading-tight">{artist.artist}</p>
+              <p className="text-xs text-muted-foreground truncate mt-0.5">{artist.songCount} song{artist.songCount !== 1 ? "s" : ""}</p>
+            </div>
+            <div className="flex flex-col items-end gap-1 flex-shrink-0">
+              <div className="flex items-center gap-1 bg-primary/10 text-primary rounded-full px-2.5 py-1">
+                <Play className="w-2.5 h-2.5 fill-primary" />
+                <span className="text-xs font-bold tabular-nums">{artist.plays}</span>
+              </div>
+              <span className="text-[10px] text-muted-foreground/70 tabular-nums">{fmtListenTime(artist.listenSeconds)}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+
 function HistoryRow({ entry, onPlay }: { entry: HistoryEntry; onPlay: () => void }) {
   return (
     <div onClick={onPlay}
@@ -319,6 +362,9 @@ export default function HistoryPage() {
   const [topDay,      setTopDay]      = useState<TopSong[]>([])
   const [topWeek,     setTopWeek]     = useState<TopSong[]>([])
   const [topMonth,    setTopMonth]    = useState<TopSong[]>([])
+  const [topArtistsDay,   setTopArtistsDay]   = useState<TopArtist[]>([])
+  const [topArtistsWeek,  setTopArtistsWeek]  = useState<TopArtist[]>([])
+  const [topArtistsMonth, setTopArtistsMonth] = useState<TopArtist[]>([])
   const [history,     setHistory]     = useState<HistoryEntry[]>([])
   const [badges,      setBadges]      = useState<BadgeStatus[]>([])
   const [totalXP,     setTotalXP]     = useState(0)
@@ -332,6 +378,9 @@ export default function HistoryPage() {
     setTopWeek(getTopPlayedSongs("week", 5))
     setTopMonth(getTopPlayedSongs("month", 5))
     setTopAllTime(getAllTimeTopSongs(5))
+    setTopArtistsDay(getTopArtists("day", 5))
+    setTopArtistsWeek(getTopArtists("week", 5))
+    setTopArtistsMonth(getTopArtists("month", 5))
     setHistory(getDeduplicatedHistory())
     const bs = evaluateBadges()
     setBadges(bs)
@@ -340,14 +389,16 @@ export default function HistoryPage() {
 
   const handleClear = () => {
     if (!confirm("Clear all song history? This cannot be undone.")) return
-    clearSongHistory(); setHistory([]); setTopDay([]); setTopWeek([]); setTopMonth([])
+    clearSongHistory()
+    setHistory([]); setTopDay([]); setTopWeek([]); setTopMonth([])
+    setTopArtistsDay([]); setTopArtistsWeek([]); setTopArtistsMonth([])
   }
 
   const filtered = query.trim()
     ? history.filter(e => e.song.title.toLowerCase().includes(query.toLowerCase()) || e.song.artist.toLowerCase().includes(query.toLowerCase()))
     : history
   const groups       = groupByDate(filtered)
-  const hasAnyTop    = topDay.length || topWeek.length || topMonth.length
+  const hasAnyTop    = topDay.length || topWeek.length || topMonth.length || topArtistsDay.length || topArtistsWeek.length || topArtistsMonth.length
   const earnedCount  = badges.filter(b => b.earned).length
   const filteredBadges = badges.filter(b => {
     if (badgeFilter === "all")    return true
@@ -451,12 +502,18 @@ export default function HistoryPage() {
               <>
                 <TopSongsSection title="⭐ All-Time Favourites" icon={<Star className="w-4 h-4 text-primary" />}
                   songs={topAllTime} onPlay={s => playSong(s)} iconBg="bg-primary/8" />
-                <TopSongsSection title="🔥 Top of the Day" icon={<Flame className="w-4 h-4 text-orange-400" />}
+                <TopSongsSection title="🔥 Top Songs of the Day" icon={<Flame className="w-4 h-4 text-orange-400" />}
                   songs={topDay} onPlay={s => playSong(s)} iconBg="bg-orange-500/8" />
-                <TopSongsSection title="📅 Top of the Week" icon={<TrendingUp className="w-4 h-4 text-blue-400" />}
+                <TopArtistsSection title="🎤 Top Artists of the Day" icon={<Users className="w-4 h-4 text-orange-400" />}
+                  artists={topArtistsDay} iconBg="bg-orange-500/8" />
+                <TopSongsSection title="📅 Top Songs of the Week" icon={<TrendingUp className="w-4 h-4 text-blue-400" />}
                   songs={topWeek} onPlay={s => playSong(s)} iconBg="bg-blue-500/8" />
-                <TopSongsSection title="🏆 Top of the Month" icon={<Trophy className="w-4 h-4 text-yellow-400" />}
+                <TopArtistsSection title="🎤 Top Artists of the Week" icon={<Users className="w-4 h-4 text-blue-400" />}
+                  artists={topArtistsWeek} iconBg="bg-blue-500/8" />
+                <TopSongsSection title="🏆 Top Songs of the Month" icon={<Trophy className="w-4 h-4 text-yellow-400" />}
                   songs={topMonth} onPlay={s => playSong(s)} iconBg="bg-yellow-500/8" />
+                <TopArtistsSection title="🎤 Top Artists of the Month" icon={<Users className="w-4 h-4 text-yellow-400" />}
+                  artists={topArtistsMonth} iconBg="bg-yellow-500/8" />
               </>
             ) : (
               <div className="flex flex-col items-center justify-center py-16 text-center">
