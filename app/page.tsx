@@ -489,13 +489,46 @@ export default function HomePage() {
   const [recentlyPlayed,  setRecentlyPlayed]  = useState<Song[]>([])
   const [activeView,      setActiveView]      = useState<View>("home")
 
-  const searchRef      = useRef<HTMLInputElement>(null)
-  const suggestionsRef = useRef<HTMLDivElement>(null)
-  const debounceRef    = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const searchedQuery  = useRef("")
+  const searchRef       = useRef<HTMLInputElement>(null)
+  const suggestionsRef  = useRef<HTMLDivElement>(null)
+  const debounceRef     = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const searchedQuery   = useRef("")
+  const resultsPushed   = useRef(false)
 
   // Load country pref on mount
   useEffect(() => { setSelectedRegion(getCountry()) }, [])
+
+  // Sync active view with browser history (hash-based)
+  useEffect(() => {
+    const viewFromHash = (): View => {
+      const h = window.location.hash.replace("#", "")
+      if (h === "results" || h === "trending" || h === "charts" || h === "radio") return h as View
+      return "home"
+    }
+
+    const initialView = viewFromHash()
+    if (initialView !== "home") setActiveView(initialView)
+    const correctUrl = initialView === "home"
+      ? window.location.pathname + window.location.search
+      : `${window.location.pathname}${window.location.search}#${initialView}`
+    window.history.replaceState({ view: initialView }, "", correctUrl)
+
+    const onPopState = (e: PopStateEvent) => {
+      const view: View = e.state?.view ?? viewFromHash()
+      setActiveView(view)
+      if (view === "results") {
+        resultsPushed.current = true
+      } else {
+        resultsPushed.current = false
+        setSearchQuery("")
+        setSuggestions([])
+        setShowSuggestions(false)
+      }
+    }
+
+    window.addEventListener("popstate", onPopState)
+    return () => window.removeEventListener("popstate", onPopState)
+  }, []) // eslint-disable-line
 
   // Loaders
   const loadRecentlyPlayed = useCallback(() => setRecentlyPlayed(getRecentlyPlayed()), [])
@@ -611,6 +644,10 @@ export default function HomePage() {
     setSearchQuery(query)
     if (!append) setIsSearching(true)
     else setIsLoadingMore(true)
+    if (!append && !resultsPushed.current) {
+      window.history.pushState({ view: "results" }, "", "#results")
+      resultsPushed.current = true
+    }
     setActiveView("results")
     searchedQuery.current = query
     try {
@@ -667,16 +704,21 @@ export default function HomePage() {
   }
 
   const clearSearch = () => {
-    setSearchQuery(""); setSuggestions([]); setShowSuggestions(false)
-    setActiveView("home")
     setSearchResults({ songs: [], artists: [], albums: [], videos: [], playlists: [], podcasts: [] })
     searchedQuery.current = ""
-    searchRef.current?.focus()
+    resultsPushed.current = false
+    window.history.back()
   }
 
   const handleNavChange = (v: View) => {
+    resultsPushed.current = false
     setActiveView(v)
     if (v !== "results") { setSearchQuery(""); setSuggestions([]); setShowSuggestions(false) }
+    if (v === "home") {
+      window.history.pushState({ view: "home" }, "", window.location.pathname)
+    } else {
+      window.history.pushState({ view: v }, "", `#${v}`)
+    }
   }
 
   useEffect(() => {
