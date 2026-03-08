@@ -1174,6 +1174,12 @@ export interface TopArtist {
   songCount: number
 }
 
+type ArtistMapEntry = {
+  artist: string
+  plays: number
+  songs: Map<string, { song: Song; plays: number }>
+}
+
 // Helper to parse duration string like "3:45" to seconds
 function parseDuration(dur: string): number {
   if (!dur) return 180
@@ -1182,6 +1188,27 @@ function parseDuration(dur: string): number {
   if (parts.length === 3) return (parts[0] || 0) * 3600 + (parts[1] || 0) * 60 + (parts[2] || 0)
   const n = parseInt(dur, 10)
   return isNaN(n) ? 180 : n
+}
+
+function mapArtistEntriesToTopArtists(artistMap: Map<string, ArtistMapEntry>, limit: number): TopArtist[] {
+  return [...artistMap.values()]
+    .map(a => {
+      const songsArr = [...a.songs.values()]
+      const bestSong = [...songsArr].sort((x, y) => y.plays - x.plays)[0]
+      const listenSeconds = songsArr.reduce((sum, s) => {
+        const dur = s.song.duration ? parseDuration(s.song.duration) : 180
+        return sum + s.plays * dur
+      }, 0)
+      return {
+        artist: a.artist,
+        thumbnail: bestSong?.song.thumbnail || "",
+        plays: a.plays,
+        listenSeconds: Math.round(listenSeconds),
+        songCount: a.songs.size,
+      }
+    })
+    .sort((a, b) => b.plays - a.plays)
+    .slice(0, limit)
 }
 
 /**
@@ -1194,11 +1221,7 @@ export function getTopArtists(period: "day" | "week" | "month", limit = 5): TopA
                : period === "week" ? now - 7 * 86_400_000
                : now - 30 * 86_400_000
 
-  const artistMap = new Map<string, {
-    artist: string
-    plays: number
-    songs: Map<string, { song: Song; plays: number }>
-  }>()
+  const artistMap = new Map<string, ArtistMapEntry>()
 
   for (const e of history) {
     if (e.playedAt < cutoff) continue
@@ -1217,24 +1240,7 @@ export function getTopArtists(period: "day" | "week" | "month", limit = 5): TopA
     entry.songs.get(e.song.id)!.plays++
   }
 
-  return [...artistMap.values()]
-    .map(a => {
-      const songsArr = [...a.songs.values()]
-      const bestSong = songsArr.sort((x, y) => y.plays - x.plays)[0]
-      const listenSeconds = songsArr.reduce((sum, s) => {
-        const dur = s.song.duration ? parseDuration(s.song.duration) : 180
-        return sum + s.plays * dur
-      }, 0)
-      return {
-        artist: a.artist,
-        thumbnail: bestSong?.song.thumbnail || "",
-        plays: a.plays,
-        listenSeconds: Math.round(listenSeconds),
-        songCount: a.songs.size,
-      }
-    })
-    .sort((a, b) => b.plays - a.plays)
-    .slice(0, limit)
+  return mapArtistEntriesToTopArtists(artistMap, limit)
 }
 
 /**
@@ -1242,11 +1248,7 @@ export function getTopArtists(period: "day" | "week" | "month", limit = 5): TopA
  */
 export function getAllTimeTopArtists(limit = 10): TopArtist[] {
   const history = getSongHistory()
-  const artistMap = new Map<string, {
-    artist: string
-    plays: number
-    songs: Map<string, { song: Song; plays: number }>
-  }>()
+  const artistMap = new Map<string, ArtistMapEntry>()
 
   for (const e of history) {
     const artistName = e.song.artist
@@ -1264,22 +1266,5 @@ export function getAllTimeTopArtists(limit = 10): TopArtist[] {
     entry.songs.get(e.song.id)!.plays++
   }
 
-  return [...artistMap.values()]
-    .map(a => {
-      const songsArr = [...a.songs.values()]
-      const bestSong = songsArr.sort((x, y) => y.plays - x.plays)[0]
-      const listenSeconds = songsArr.reduce((sum, s) => {
-        const dur = s.song.duration ? parseDuration(s.song.duration) : 180
-        return sum + s.plays * dur
-      }, 0)
-      return {
-        artist: a.artist,
-        thumbnail: bestSong?.song.thumbnail || "",
-        plays: a.plays,
-        listenSeconds: Math.round(listenSeconds),
-        songCount: a.songs.size,
-      }
-    })
-    .sort((a, b) => b.plays - a.plays)
-    .slice(0, limit)
+  return mapArtistEntriesToTopArtists(artistMap, limit)
 }
