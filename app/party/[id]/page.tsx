@@ -150,7 +150,7 @@ export default function PartyGuestPage() {
               <p className="text-xs text-muted-foreground font-mono">ID: {partyId} · {username}</p>
             </div>
           </div>
-          <Button variant="ghost" size="sm" onClick={() => router.push("/")} className="rounded-full gap-2">
+          <Button variant="ghost" size="sm" onClick={() => router.back()} className="rounded-full gap-2">
             <Music className="w-4 h-4" /> App
           </Button>
         </header>

@@ -135,7 +135,7 @@ export default function MoodsPage() {
       <div className="sticky top-0 z-20 bg-background/90 backdrop-blur-md border-b border-border/30 px-4 py-3 flex items-center gap-3">
         <Button
           variant="ghost" size="icon"
-          onClick={selectedMood ? () => { setSelectedMood(null); setMoodPlaylists([]) } : () => router.push("/")}
+          onClick={selectedMood ? () => { setSelectedMood(null); setMoodPlaylists([]) } : () => router.back()}
           className="rounded-full"
         >
           <ChevronLeft className="w-5 h-5" />
