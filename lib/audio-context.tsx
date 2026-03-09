@@ -6,9 +6,10 @@ import {
   useEffect, useCallback, type ReactNode,
 } from "react"
 import type { LyricLine, LyricsResponse, Song, UpNextQueue } from "./types"
-import { recordListenSeconds, addToSongHistory, recordBadgeEvent } from "./storage"
+import { recordListenSeconds, addToSongHistory, recordBadgeEvent, getPartyUsername } from "./storage"
 
 const LYRICS_API = "https://test-0k.onrender.com"
+const PARTY_SERVER = process.env.NEXT_PUBLIC_PARTY_SERVER || ""
 
 interface AudioContextType {
   currentSong:       Song | null
@@ -40,7 +41,7 @@ interface AudioContextType {
   partyId:           string | null
   isPartyHost:       boolean
   startParty:        () => Promise<string | null>
-  stopParty:         () => void
+  stopParty:         () => Promise<void>
   joinParty:         (id: string) => void
   addToPartyQueue:   (song: Song) => Promise<boolean>
   // Smart Queue Suggestions
@@ -159,6 +160,7 @@ export function AudioProvider({ children }: { children: ReactNode }) {
 
   // Party Mode State
   const [partyId,           setPartyId]           = useState<string | null>(null)
+  const [partyHostId,       setPartyHostId]       = useState<string | null>(null)
   const [isPartyHost,       setIsPartyHost]       = useState(false)
   const partyIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const listenTickRef    = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -728,16 +730,17 @@ export function AudioProvider({ children }: { children: ReactNode }) {
   // ── Party Mode Logic ────────────────────────────────────
   const startParty = useCallback(async () => {
     try {
-      const res = await fetch("https://jsonblob.com/api/jsonBlob", {
+      const res = await fetch(`${PARTY_SERVER}/party`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ songs: [] })
+        body: JSON.stringify({ currentSong: currentSong ?? undefined })
       })
-      const location = res.headers.get("Location")
-      if (!location) return null
-      const id = location.split("/").pop() || null
+      if (!res.ok) return null
+      const data = await res.json()
+      const id = data.id || null
       if (id) {
         setPartyId(id)
+        setPartyHostId(data.hostId || null)
         setIsPartyHost(true)
         return id
       }
@@ -745,13 +748,19 @@ export function AudioProvider({ children }: { children: ReactNode }) {
       console.error("Failed to start party:", err)
     }
     return null
-  }, [])
+  }, [currentSong])
 
-  const stopParty = useCallback(() => {
+  const stopParty = useCallback(async () => {
+    if (partyId && partyHostId) {
+      try {
+        await fetch(`${PARTY_SERVER}/party/${partyId}?hostId=${partyHostId}`, { method: "DELETE" })
+      } catch {}
+    }
     setPartyId(null)
+    setPartyHostId(null)
     setIsPartyHost(false)
     if (partyIntervalRef.current) clearInterval(partyIntervalRef.current)
-  }, [])
+  }, [partyId, partyHostId])
 
   const joinParty = useCallback((id: string) => {
     setPartyId(id)
@@ -761,15 +770,13 @@ export function AudioProvider({ children }: { children: ReactNode }) {
   const addToPartyQueue = useCallback(async (song: Song) => {
     if (!partyId) return false
     try {
-      const res = await fetch(`https://jsonblob.com/api/jsonBlob/${partyId}`)
-      const data = await res.json()
-      data.songs.push(song)
-      await fetch(`https://jsonblob.com/api/jsonBlob/${partyId}`, {
-        method: "PUT",
+      const res = await fetch(`${PARTY_SERVER}/party/${partyId}/queue`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data)
+        body: JSON.stringify({ song, guestName: getPartyUsername() })
       })
-      return true
+      if (res.status === 409) return false // duplicate song
+      return res.ok
     } catch (err) {
       console.error("Failed to add to party queue:", err)
       return false
@@ -777,13 +784,14 @@ export function AudioProvider({ children }: { children: ReactNode }) {
   }, [partyId])
 
   useEffect(() => {
-    if (isPartyHost && partyId) {
+    if (isPartyHost && partyId && partyHostId) {
       partyIntervalRef.current = setInterval(async () => {
         try {
-          const res = await fetch(`https://jsonblob.com/api/jsonBlob/${partyId}`)
+          const res = await fetch(`${PARTY_SERVER}/party/${partyId}/queue?hostId=${partyHostId}`)
+          if (!res.ok) return
           const data = await res.json()
           if (data.songs && data.songs.length > 0) {
-            // Add new songs to local queue
+            // Add new songs to local queue (server auto-clears on GET)
             data.songs.forEach((s: Song) => {
               setQueue(prev => {
                 if (prev.some(x => x.id === s.id)) return prev
@@ -792,18 +800,22 @@ export function AudioProvider({ children }: { children: ReactNode }) {
                 return next
               })
             })
-            // Clear the blob queue
-            await fetch(`https://jsonblob.com/api/jsonBlob/${partyId}`, {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ songs: [] })
-            })
           }
         } catch {}
       }, 5000)
     }
     return () => { if (partyIntervalRef.current) clearInterval(partyIntervalRef.current) }
-  }, [isPartyHost, partyId])
+  }, [isPartyHost, partyId, partyHostId])
+
+  // Sync currently playing song to the party server (host only)
+  useEffect(() => {
+    if (!isPartyHost || !partyId || !partyHostId) return
+    fetch(`${PARTY_SERVER}/party/${partyId}/song?hostId=${partyHostId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ song: currentSong })
+    }).catch(() => {})
+  }, [currentSong, isPartyHost, partyId, partyHostId])
 
   const setVolume = useCallback((vol: number) => {
     volumeRef.current = vol
