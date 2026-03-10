@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { getGuestId, getPartyUsername } from "@/lib/storage"
 import type { Song } from "@/lib/types"
 
+const PARTY_SERVER = process.env.NEXT_PUBLIC_PARTY_SERVER || ""
 const EMOJIS = ["🔥", "❤️", "😍", "🎵", "💃", "🙌", "🎉", "😮"]
 
 interface ChatMsg { id: string; user: string; text: string; ts: number }
@@ -20,28 +21,58 @@ export default function PartyGuestPage() {
   const guestId  = getGuestId()
   const username = getPartyUsername()
 
-  const [query,     setQuery]     = useState("")
-  const [results,   setResults]   = useState<Song[]>([])
-  const [searching, setSearching] = useState(false)
-  const [addedIds,  setAddedIds]  = useState<Set<string>>(new Set())
-  const [chat,      setChat]      = useState<ChatMsg[]>([])
-  const [chatInput, setChatInput] = useState("")
-  const [votes,     setVotes]     = useState<VoteData[]>([])
-  const [queue,     setQueue]     = useState<Song[]>([])
-  const [activeTab, setActiveTab] = useState<"search" | "queue" | "chat">("search")
-  const [reactions, setReactions] = useState<{ emoji: string; id: number }[]>([])
+  const [query,       setQuery]       = useState("")
+  const [results,     setResults]     = useState<Song[]>([])
+  const [searching,   setSearching]   = useState(false)
+  const [addedIds,    setAddedIds]    = useState<Set<string>>(new Set())
+  const [dupIds,      setDupIds]      = useState<Set<string>>(new Set())
+  const [chat,        setChat]        = useState<ChatMsg[]>([])
+  const [chatInput,   setChatInput]   = useState("")
+  const [votes,       setVotes]       = useState<VoteData[]>([])
+  const [queue,       setQueue]       = useState<Song[]>([])
+  const [currentSong, setCurrentSong] = useState<Song | null>(null)
+  const [guestCount,  setGuestCount]  = useState(0)
+  const [activeTab,   setActiveTab]   = useState<"search" | "queue" | "chat">("search")
+  const [reactions,   setReactions]   = useState<{ emoji: string; id: number }[]>([])
   const chatEndRef = useRef<HTMLDivElement>(null)
   const pollRef    = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Join the party on mount
+  useEffect(() => {
+    if (!partyId) return
+    fetch(`${PARTY_SERVER}/party/${partyId}/join`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ guestName: username }),
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return
+        setQueue(data.queue || [])
+        setCurrentSong(data.currentSong || null)
+        setGuestCount(data.guestCount || 0)
+      })
+      .catch(() => {})
+  }, [partyId]) // username is stable (from localStorage) — intentionally omitted
 
   // Poll party state every 3 seconds
   const poll = useCallback(async () => {
     try {
-      const res  = await fetch(`/api/party?id=${partyId}`)
-      if (!res.ok) return
-      const data = await res.json()
-      setChat(data.chat  || [])
-      setVotes(data.votes || [])
-      setQueue(data.queue || [])
+      // Get queue and currentSong from external party server
+      const extRes = await fetch(`${PARTY_SERVER}/party/${partyId}`)
+      if (extRes.ok) {
+        const extData = await extRes.json()
+        setQueue(extData.queue || [])
+        setCurrentSong(extData.currentSong || null)
+        setGuestCount(extData.guestCount || 0)
+      }
+      // Get chat and votes from local API
+      const localRes = await fetch(`/api/party?id=${partyId}`)
+      if (localRes.ok) {
+        const localData = await localRes.json()
+        setChat(localData.chat   || [])
+        setVotes(localData.votes || [])
+      }
     } catch {}
   }, [partyId])
 
@@ -79,11 +110,17 @@ export default function PartyGuestPage() {
 
   const addSong = async (song: Song) => {
     try {
-      const res = await fetch("/api/party", {
+      const res = await fetch(`${PARTY_SERVER}/party/${partyId}/queue`, {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ action: "addSong", partyId, guestId, song }),
+        body:    JSON.stringify({ song, guestName: username }),
       })
+      if (res.status === 409) {
+        // Duplicate song — show brief feedback
+        setDupIds(prev => new Set(prev).add(song.id))
+        setTimeout(() => setDupIds(prev => { const n = new Set(prev); n.delete(song.id); return n }), 2500)
+        return
+      }
       if (res.ok) {
         setAddedIds(prev => new Set(prev).add(song.id))
         setTimeout(() => setAddedIds(prev => { const n = new Set(prev); n.delete(song.id); return n }), 2500)
@@ -211,12 +248,12 @@ export default function PartyGuestPage() {
                   </div>
                   <Button
                     size="icon"
-                    variant={addedIds.has(song.id) ? "default" : "secondary"}
+                    variant={addedIds.has(song.id) ? "default" : dupIds.has(song.id) ? "destructive" : "secondary"}
                     className="rounded-full flex-shrink-0 w-8 h-8"
                     onClick={() => addSong(song)}
-                    disabled={addedIds.has(song.id)}
+                    disabled={addedIds.has(song.id) || dupIds.has(song.id)}
                   >
-                    {addedIds.has(song.id) ? <Check className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+                    {addedIds.has(song.id) ? <Check className="w-3.5 h-3.5" /> : dupIds.has(song.id) ? <span className="text-[10px]">✕</span> : <Plus className="w-3.5 h-3.5" />}
                   </Button>
                 </div>
               ))}
