@@ -121,7 +121,7 @@ export async function POST(req: NextRequest) {
   // ── Send chat message ──
   if (action === "chat" && text) {
     const msg: ChatMessage = {
-      id:      Math.random().toString(36).slice(2, 9),
+      id:      `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
       user:    String(username || guestId || "Guest").slice(0, 40),
       text:    String(text).slice(0, 200),
       ts:      Date.now(),

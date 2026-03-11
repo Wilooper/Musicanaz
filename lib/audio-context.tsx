@@ -730,7 +730,6 @@ export function AudioProvider({ children }: { children: ReactNode }) {
   // ── Party Mode Logic ────────────────────────────────────
   const startParty = useCallback(async () => {
     try {
-      const hostGuestId = getPartyUsername() // reuse username as identifier seed
       // Create on external server (canonical queue)
       let externalId: string | null = null
       if (PARTY_SERVER) {

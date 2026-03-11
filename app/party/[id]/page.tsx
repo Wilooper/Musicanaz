@@ -113,7 +113,7 @@ export default function PartyGuestPage() {
     if (msg.type === "song")     setCurrentSong(msg.payload)
     if (msg.type === "reaction") {
       const { emoji } = msg.payload as { emoji: string; user: string }
-      const newR = { emoji, id: Date.now() + Math.random(), fromOther: true }
+      const newR = { emoji, id: Date.now() * 1000 + Math.floor(Math.random() * 1000), fromOther: true }
       setReactions(prev => [...prev, newR])
       setTimeout(() => setReactions(prev => prev.filter(r => r.id !== newR.id)), 2500)
     }
@@ -200,7 +200,7 @@ export default function PartyGuestPage() {
           if (newRemote.length > 0) {
             lastReactionTsRef.current = Math.max(...d.reactions.map((r: any) => r.ts))
             newRemote.forEach((r: any) => {
-              const newR = { emoji: r.emoji, id: Date.now() + Math.random(), fromOther: true }
+              const newR = { emoji: r.emoji, id: Date.now() * 1000 + Math.floor(Math.random() * 1000), fromOther: true }
               setReactions(prev => [...prev, newR])
               setTimeout(() => setReactions(prev => prev.filter(x => x.id !== newR.id)), 2500)
             })

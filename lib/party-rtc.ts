@@ -217,10 +217,12 @@ export class PartyRTC {
 
     if (entry.retries < MAX_RETRIES) {
       const delay = (entry.retries + 1) * 2000
+      const nextRetries = entry.retries + 1
       setTimeout(() => {
-        if (!this.destroyed) {
+        if (!this.destroyed && !this.peers.has(peerId)) {
           const newEntry = this.createPeerEntry(peerId)
-          newEntry.retries = entry.retries + 1
+          newEntry.retries = nextRetries
+          this.initiateConnection(peerId).catch(() => {})
         }
       }, delay)
     }
