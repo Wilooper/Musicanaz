@@ -730,18 +730,38 @@ export function AudioProvider({ children }: { children: ReactNode }) {
   // ── Party Mode Logic ────────────────────────────────────
   const startParty = useCallback(async () => {
     try {
-      const res = await fetch(`${PARTY_SERVER}/party`, {
-        method: "POST",
+      // Create on external server (canonical queue)
+      let externalId: string | null = null
+      if (PARTY_SERVER) {
+        const extRes = await fetch(`${PARTY_SERVER}/party`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ currentSong: currentSong ?? undefined })
+        })
+        if (extRes.ok) {
+          const extData = await extRes.json()
+          externalId = extData.id || null
+        }
+      }
+
+      // Create on local API (chat / votes / guests / signals)
+      const { getGuestId } = await import("./storage")
+      const myGuestId = getGuestId()
+      const localRes = await fetch("/api/party", {
+        method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ currentSong: currentSong ?? undefined })
+        body:    JSON.stringify({ action: "create", guestId: myGuestId }),
       })
-      if (!res.ok) return null
-      const data = await res.json()
-      const id = data.id || null
+      if (!localRes.ok) return null
+      const localData = await localRes.json()
+      const id = externalId || localData.partyId || null
       if (id) {
         setPartyId(id)
-        setPartyHostId(data.hostId || null)
+        setPartyHostId(localData.partyId ? myGuestId : null)
         setIsPartyHost(true)
+        // Clear the current player queue — party queue takes over
+        setQueue([])
+        queueRef.current = []
         return id
       }
     } catch (err) {
@@ -753,7 +773,9 @@ export function AudioProvider({ children }: { children: ReactNode }) {
   const stopParty = useCallback(async () => {
     if (partyId && partyHostId) {
       try {
-        await fetch(`${PARTY_SERVER}/party/${partyId}?hostId=${partyHostId}`, { method: "DELETE" })
+        if (PARTY_SERVER) {
+          await fetch(`${PARTY_SERVER}/party/${partyId}?hostId=${partyHostId}`, { method: "DELETE" })
+        }
       } catch {}
     }
     setPartyId(null)
@@ -770,51 +792,76 @@ export function AudioProvider({ children }: { children: ReactNode }) {
   const addToPartyQueue = useCallback(async (song: Song) => {
     if (!partyId) return false
     try {
-      const res = await fetch(`${PARTY_SERVER}/party/${partyId}/queue`, {
-        method: "POST",
+      if (PARTY_SERVER) {
+        const res = await fetch(`${PARTY_SERVER}/party/${partyId}/queue`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ song, guestName: getPartyUsername() })
+        })
+        if (res.status === 409) return false // duplicate song
+        if (!res.ok) return false
+      }
+      // Mirror to local API for vote-sort and host controls
+      const { getGuestId } = await import("./storage")
+      await fetch("/api/party", {
+        method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ song, guestName: getPartyUsername() })
-      })
-      if (res.status === 409) return false // duplicate song
-      return res.ok
+        body:    JSON.stringify({ action: "addSong", partyId, guestId: getGuestId(), username: getPartyUsername(), song }),
+      }).catch(() => {})
+      return true
     } catch (err) {
       console.error("Failed to add to party queue:", err)
       return false
     }
   }, [partyId])
 
+  // ── Host: poll party queue and sync it (vote-sorted) as the player queue ──
   useEffect(() => {
-    if (isPartyHost && partyId && partyHostId) {
+    if (isPartyHost && partyId) {
       partyIntervalRef.current = setInterval(async () => {
         try {
-          const res = await fetch(`${PARTY_SERVER}/party/${partyId}/queue?hostId=${partyHostId}`)
-          if (!res.ok) return
-          const data = await res.json()
-          if (data.songs && data.songs.length > 0) {
-            // Add new songs to local queue (server auto-clears on GET)
-            data.songs.forEach((s: Song) => {
-              setQueue(prev => {
-                if (prev.some(x => x.id === s.id)) return prev
-                const next = [...prev, s]
-                queueRef.current = next
-                return next
-              })
-            })
-          }
+          // Fetch vote-sorted queue from local API
+          const localRes = await fetch(`/api/party?id=${partyId}`)
+          if (!localRes.ok) return
+          const localData = await localRes.json()
+          const partyQueue: any[] = localData.queue || []
+          const partyVotes: { songId: string; voters: string[] }[] = localData.votes || []
+
+          if (partyQueue.length === 0) return
+
+          // Sort by vote count desc, then addedAt asc
+          const sorted = [...partyQueue].sort((a, b) => {
+            const va = partyVotes.find(v => v.songId === a.id)?.voters.length || 0
+            const vb = partyVotes.find(v => v.songId === b.id)?.voters.length || 0
+            if (vb !== va) return vb - va
+            return (a.addedAt || 0) - (b.addedAt || 0)
+          })
+
+          // Replace player queue with sorted party queue
+          setQueue(prev => {
+            // Only update if the sorted queue differs from current queue
+            const ids = prev.map(s => s.id).join(",")
+            const newIds = sorted.map((s: any) => s.id).join(",")
+            if (ids === newIds) return prev
+            queueRef.current = sorted as Song[]
+            return sorted as Song[]
+          })
         } catch {}
       }, 5000)
     }
     return () => { if (partyIntervalRef.current) clearInterval(partyIntervalRef.current) }
-  }, [isPartyHost, partyId, partyHostId])
+  }, [isPartyHost, partyId])
 
   // Sync currently playing song to the party server (host only)
   useEffect(() => {
     if (!isPartyHost || !partyId || !partyHostId) return
-    fetch(`${PARTY_SERVER}/party/${partyId}/song?hostId=${partyHostId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ song: currentSong })
-    }).catch(() => {})
+    if (PARTY_SERVER) {
+      fetch(`${PARTY_SERVER}/party/${partyId}/song?hostId=${partyHostId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ song: currentSong })
+      }).catch(() => {})
+    }
   }, [currentSong, isPartyHost, partyId, partyHostId])
 
   const setVolume = useCallback((vol: number) => {
