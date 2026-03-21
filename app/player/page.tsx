@@ -286,6 +286,8 @@ function PlayerContent() {
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Download state
   const [downloaded,         setDownloaded]         = useState(false)
+  const [downloadProgress,   setDownloadProgress]   = useState<number | null>(null)
+  const [downloadError,      setDownloadError]      = useState<string | null>(null)
   // Podcast mode
   const [podcastEpisodes,    setPodcastEpisodes]    = useState<any[]>([])
   const [podcastEpiLoading,  setPodcastEpiLoading]  = useState(false)
@@ -405,7 +407,7 @@ function PlayerContent() {
     setAiMode(null)
     setAiError(null)
   }, [songId])  // reset on song change
-  useEffect(() => { setDownloaded(false) }, [songId])  // reset on song change
+  useEffect(() => { setDownloaded(false); setDownloadProgress(null); setDownloadError(null) }, [songId])  // reset on song change
 
   // Sync URL when currentSong changes via auto-advance through queue
   useEffect(() => {
@@ -791,21 +793,122 @@ function PlayerContent() {
     }
   }, [currentSong, songId, currentTime])
 
-  // Download — opens YouTube Music in new tab (actual audio extraction not possible client-side)
-  const handleDownload = () => {
-    if (!currentSong) return
+  // ── Download (two-tier) ──────────────────────────────────────────────────
+  // Tier 1: Invidious public API → /api/download/proxy edge route
+  //         Free, zero setup. Works for most users.
+  // Tier 2: User-hosted musicanaz-downloader.js yt-dlp server
+  //         Configured in Settings. Fallback when Tier 1 fails.
+  // window.open('about:blank') MUST be called before any await — this keeps
+  // us inside Chrome's user-gesture window so the popup is never blocked.
+  const INVIDIOUS_INSTANCES = [
+    "https://inv.nadeko.net",
+    "https://invidious.io.lol",
+    "https://yt.artemislena.eu",
+    "https://invidious.nerdvpn.de",
+    "https://invidious.privacyredirect.com",
+  ]
+  const DL_SERVER_KEY = "musicanaz_dl_server"
+
+  // ── Download: start → poll with progress → fetch blob → save ────────────
+  // User stays on the player page the whole time.
+  // Progress (0-100) drives a circular SVG ring on the button.
+  // When ready, the file is fetched as a Blob and saved via <a download>.
+  const executeDownload = async (
+    vid: string,
+    filename: string,
+    base: string,   // empty string = use Next.js proxy
+    direct: boolean,
+  ) => {
+    const startUrl  = direct ? `${base}/download/start`         : `/api/download/start`
+    const statusUrl = (id: string) =>
+      direct ? `${base}/download/status/${id}` : `/api/download/status/${id}`
+    const fileUrl   = (id: string) =>
+      direct ? `${base}/download/file/${id}`   : `/api/download/file/${id}`
+    const doneUrl   = (id: string) =>
+      direct ? `${base}/download/done/${id}`   : `/api/download/done/${id}`
+
+    // 1. Start the session
+    setDownloadProgress(0)
+    const startRes = await fetch(startUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        video_id:  vid,
+        title:     currentSong?.title     || "",
+        artist:    currentSong?.artist    || "",
+        album:     currentSong?.album     || "",
+        thumbnail: currentSong?.thumbnail || "",
+      }),
+    })
+    if (!startRes.ok) throw new Error(`Start failed: ${startRes.status}`)
+    const { uid } = await startRes.json()
+    if (!uid) throw new Error("No session uid returned")
+
+    // 2. Poll until ready — update the progress ring from server's progress %
+    let ready = false
+    for (let i = 0; i < 60; i++) {
+      await new Promise(r => setTimeout(r, 2_000))
+      const st = await fetch(statusUrl(uid)).then(r => r.json())
+      if (typeof st.progress === "number") setDownloadProgress(Math.min(st.progress, 99))
+      if (st.status === "ready") { ready = true; break }
+      if (st.status === "error") throw new Error(st.detail || "Server-side error")
+    }
+    if (!ready) throw new Error("Download timed out (2 min)")
+
+    // 3. Fetch the finished file as a Blob (no new tab, user stays here)
+    setDownloadProgress(99)
+    const fileRes = await fetch(fileUrl(uid))
+    if (!fileRes.ok) throw new Error(`File fetch failed: ${fileRes.status}`)
+
+    // Detect content type from response to get correct extension
+    const ct  = fileRes.headers.get("Content-Type") || "audio/mpeg"
+    const ext = ct.includes("mp4") ? "m4a" : ct.includes("ogg") ? "ogg" : ct.includes("webm") ? "webm" : "mp3"
+    const fn  = filename.replace(/\.(mp3|m4a|ogg|webm)$/, `.${ext}`)
+
+    const blob    = await fileRes.blob()
+    const blobUrl = URL.createObjectURL(blob)
+
+    // Trigger browser Save-As via hidden <a download> — no new tab
+    const a = document.createElement("a")
+    a.href     = blobUrl
+    a.download = fn
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 30_000)
+
+    // 4. Cleanup
+    fetch(doneUrl(uid), { method: "POST" }).catch(() => {})
+    setDownloadProgress(100)
+  }
+
+  // ── handleDownload ───────────────────────────────────────────────────────
+  // Priority: user's saved server → MUSIVA proxy
+  // No window.open — user stays on the player, progress shown in the button.
+  const handleDownload = async () => {
+    if (!currentSong || downloadProgress !== null || downloaded) return
     const vid = currentSong.videoId || currentSong.id
     if (!vid) return
-    // Open YouTube Music link — user can download from there or use yt-dlp
-    const ytUrl = `https://music.youtube.com/watch?v=${encodeURIComponent(vid)}`
-    window.open(ytUrl, "_blank", "noopener,noreferrer")
-    setDownloaded(true)
-    addToDownloaded({
-      ...currentSong,
-      audioUrl: ytUrl,
-      cachedAt: Date.now(),
-      downloadedAt: Date.now(),
-    })
+
+    setDownloadError(null)
+
+    const safe = (s: string) => s.replace(/[\/\\?%*:|"<>]/g, "").trim().slice(0, 80)
+    const filename = `${safe(currentSong.artist || "Unknown")} - ${safe(currentSong.title || "Unknown")}.mp3`
+
+    try {
+      const userServer = (localStorage.getItem(DL_SERVER_KEY) || "").trim().replace(/\/+$/, "")
+      if (userServer) {
+        await executeDownload(vid, filename, userServer, true)
+      } else {
+        await executeDownload(vid, filename, "", false)
+      }
+      addToDownloaded({ ...currentSong, audioUrl: "", cachedAt: Date.now(), downloadedAt: Date.now() })
+      setDownloaded(true)
+    } catch (err: any) {
+      console.error("[download]", err)
+      setDownloadError(err?.message || "Download failed. Try again.")
+      setDownloadProgress(null)
+    }
   }
 
   const handleSelectPlaylist = (pid: string) => {
@@ -1034,16 +1137,64 @@ function PlayerContent() {
               )}
               {/* Download — hidden for podcasts */}
               {!isPodcast && (
-                <button
-                  onClick={handleDownload}
-                  className={`p-2.5 rounded-full hover:bg-white/10 transition-all ${downloaded ? "text-green-400" : "text-muted-foreground"}`}
-                  title={downloaded ? "Opened in YouTube Music" : "Open in YouTube Music to Download"}
-                >
-                  {downloaded
-                    ? <Check className="w-5 h-5" />
-                    : <Download className="w-5 h-5" />
-                  }
-                </button>
+                <div className="flex flex-col items-center gap-1">
+                  <button
+                    onClick={handleDownload}
+                    disabled={downloadProgress !== null || downloaded}
+                    className={[
+                      "relative p-2.5 rounded-full hover:bg-white/10 transition-all",
+                      downloaded     ? "text-green-400" :
+                      downloadError  ? "text-amber-400" : "text-muted-foreground",
+                      downloadProgress !== null ? "cursor-wait" : "",
+                    ].join(" ")}
+                    title={
+                      downloaded           ? "Saved — check Downloads folder" :
+                      downloadProgress !== null
+                        ? `Downloading… ${downloadProgress ?? 0}%` :
+                      downloadError        ? downloadError :
+                      "Download to device"
+                    }
+                  >
+                    {/* Circular SVG progress ring — visible while downloading */}
+                    {downloadProgress !== null && !downloaded && (
+                      <svg
+                        className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none"
+                        viewBox="0 0 40 40"
+                      >
+                        {/* Track */}
+                        <circle cx="20" cy="20" r="17" fill="none"
+                          stroke="currentColor" strokeWidth="2.5" strokeOpacity="0.15" />
+                        {/* Progress arc */}
+                        <circle cx="20" cy="20" r="17" fill="none"
+                          stroke="currentColor" strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeDasharray={`${((downloadProgress ?? 0) / 100) * 106.8} 106.8`}
+                          className="transition-all duration-500"
+                        />
+                      </svg>
+                    )}
+                    {downloaded
+                      ? <Check className="w-5 h-5" />
+                      : downloadProgress !== null
+                        ? <SpinnerIcon className="w-4 h-4 animate-spin opacity-70" />
+                        : <Download className={`w-5 h-5 ${downloadError ? "text-amber-400" : ""}`} />
+                    }
+                  </button>
+                  {/* Error hint */}
+                  {downloadError && downloadError !== "no-server" && !downloaded && downloadProgress === null && (
+                    <span className="text-[10px] text-amber-400/80 leading-tight text-center max-w-[72px] truncate">
+                      {downloadError.length > 30 ? "Failed — tap retry" : downloadError}
+                    </span>
+                  )}
+                  {downloadError === "no-server" && (
+                    <button
+                      onClick={() => router.push("/settings")}
+                      className="text-[10px] text-amber-400/80 hover:text-amber-300 underline leading-tight text-center max-w-[72px]"
+                    >
+                      Setup server
+                    </button>
+                  )}
+                </div>
               )}
               {/* Share */}
               <button

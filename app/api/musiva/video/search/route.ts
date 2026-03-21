@@ -1,28 +1,18 @@
 import { type NextRequest, NextResponse } from "next/server"
-
-const BASE_URL = process.env.MUSIVA_API_URL || "https://turbo-14uz.onrender.com"
+const BASE = process.env.MUSIVA_API_URL || "https://turbo-14uz.onrender.com"
 
 export async function GET(request: NextRequest) {
+  const sp       = request.nextUrl.searchParams
+  const q        = sp.get("q")
+  const limit    = sp.get("limit")    || "20"
+  const country  = sp.get("country")  || "ZZ"
+  const language = sp.get("language") || "en"
+  if (!q) return NextResponse.json({ error: "Missing q" }, { status: 400 })
   try {
-    const searchParams = request.nextUrl.searchParams
-    const q = searchParams.get("q")
-    const limit = searchParams.get("limit") || "20"
-
-    if (!q) {
-      return NextResponse.json({ error: "Missing 'q' parameter" }, { status: 400 })
-    }
-
-    const url = `${BASE_URL}/search?query=${encodeURIComponent(q)}&filter=videos&limit=${limit}`
-    const response = await fetch(url)
-
-    if (!response.ok) {
-      throw new Error(`API returned ${response.status}`)
-    }
-
-    const data = await response.json()
-    return NextResponse.json(data)
-  } catch (error) {
-    console.error("Video search error:", error)
+    const res = await fetch(`${BASE}/search?query=${encodeURIComponent(q)}&filter=videos&limit=${limit}&country=${country}&language=${language}`)
+    if (!res.ok) throw new Error(`${res.status}`)
+    return NextResponse.json(await res.json())
+  } catch {
     return NextResponse.json({ error: "Video search failed", videos: [] }, { status: 500 })
   }
 }

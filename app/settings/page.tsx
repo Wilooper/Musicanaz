@@ -69,6 +69,7 @@ export default function SettingsPage() {
     country: "ZZ", language: "en", theme: "system",
     groqApiKey: "", transliterateEnabled: true,
     translationEnabled: true, transliterateLanguage: "English",
+    trendingSource: "all", chartsSource: "all",
   })
   const [saved,           setSaved]           = useState(false)
   const [showCountryList, setShowCountryList] = useState(false)
@@ -95,6 +96,16 @@ export default function SettingsPage() {
   const [importMsg,      setImportMsg]      = useState("")
   const [importMode,     setImportMode]     = useState<"replace"|"merge">("replace")
   const [importing,      setImporting]      = useState(false)
+  // Download server
+  const [dlServer,       setDlServer]       = useState("")
+  const [dlServerSaved,  setDlServerSaved]  = useState(false)
+  const [dlServerStatus, setDlServerStatus] = useState<"idle"|"ok"|"fail"|"checking">("idle")
+
+  // Load download server URL from localStorage
+  useEffect(() => {
+    const stored = typeof window !== "undefined" ? localStorage.getItem("musicanaz_dl_server") || "" : ""
+    setDlServer(stored)
+  }, [])
 
   useEffect(() => {
     const p = getPreferences()
@@ -257,6 +268,63 @@ export default function SettingsPage() {
           <p className="text-xs text-muted-foreground mt-3 px-1">
             Select <strong>Global</strong> to see content from all regions. Changing this affects the home feed, charts, and moods — search is always global.
           </p>
+        </section>
+
+        {/* ── Content Sources ─── */}
+        <section>
+          <SectionHeader
+            icon={<Music className="w-5 h-5 text-primary" />}
+            title="Content Sources"
+            desc="Choose which music services power the Trending and Charts sections. All combines everything for the best results."
+          />
+
+          <div className="rounded-2xl bg-card/40 border border-border/30 p-4 mb-3">
+            <p className="text-sm font-semibold mb-3">Trending source</p>
+            <div className="flex flex-wrap gap-2">
+              {([
+                ["all",    "🎵 All Sources"],
+                ["ytm",    "▶ YouTube Music"],
+                ["apple",  " Apple Music"],
+                ["deezer", "🎧 Deezer"],
+                ["lastfm", "📻 Last.fm"],
+              ] as const).map(([src, label]) => (
+                <button
+                  key={src}
+                  onClick={() => update({ trendingSource: src })}
+                  className={[
+                    "px-3 py-1.5 rounded-full text-xs font-medium border transition-all",
+                    prefs.trendingSource === src
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-card/60 text-muted-foreground border-border/40 hover:border-primary/40 hover:text-foreground",
+                  ].join(" ")}
+                >{label}</button>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-2xl bg-card/40 border border-border/30 p-4">
+            <p className="text-sm font-semibold mb-3">Charts source</p>
+            <div className="flex flex-wrap gap-2">
+              {([
+                ["all",    "🎵 All Sources"],
+                ["ytm",    "▶ YouTube Music"],
+                ["apple",  " Apple Music"],
+                ["deezer", "🎧 Deezer"],
+                ["lastfm", "📻 Last.fm"],
+              ] as const).map(([src, label]) => (
+                <button
+                  key={src}
+                  onClick={() => update({ chartsSource: src })}
+                  className={[
+                    "px-3 py-1.5 rounded-full text-xs font-medium border transition-all",
+                    prefs.chartsSource === src
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-card/60 text-muted-foreground border-border/40 hover:border-primary/40 hover:text-foreground",
+                  ].join(" ")}
+                >{label}</button>
+              ))}
+            </div>
+          </div>
         </section>
 
         {/* ── AI Features (Groq) ─── */}
@@ -828,6 +896,114 @@ export default function SettingsPage() {
           <p className="text-xs text-center text-muted-foreground/50 mt-4 px-2">
             Musicanaz is not affiliated with YouTube or Google. All music data is sourced from YouTube Music via an unofficial API for personal use.
           </p>
+        </section>
+
+        {/* ── Download Server ── */}
+        <section>
+          <SectionHeader
+            icon={<Download className="w-5 h-5 text-primary" />}
+            title="Download Server"
+            desc="Downloads work automatically for most songs. If they fail, you can run the included musicanaz-downloader.js on any device — even your phone via Termux — and paste the URL here."
+          />
+
+          <div className="rounded-2xl bg-card/40 border border-border/30 p-4 mb-3">
+            {/* Status indicator */}
+            <div className="flex items-start gap-3 mb-4">
+              <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                dlServerStatus === "ok"   ? "bg-green-500/10" :
+                dlServerStatus === "fail" ? "bg-red-500/10" :
+                "bg-primary/10"
+              }`}>
+                <Download className={`w-4 h-4 ${
+                  dlServerStatus === "ok"   ? "text-green-400" :
+                  dlServerStatus === "fail" ? "text-red-400" :
+                  "text-primary"
+                }`} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold">
+                  {dlServer ? "Download Server Configured" : "No Server Configured"}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5 break-all">
+                  {dlServer
+                    ? dlServer
+                    : "Downloads use Invidious (automatic). Add a server URL as a fallback."}
+                </p>
+              </div>
+            </div>
+
+            {/* URL input */}
+            <div className="flex gap-2 mb-3">
+              <Input
+                value={dlServer}
+                onChange={e => { setDlServer(e.target.value); setDlServerStatus("idle"); setDlServerSaved(false) }}
+                placeholder="https://your-server.example.com"
+                className="flex-1 rounded-xl h-10 text-sm bg-background/60 border-border/40"
+              />
+              <Button
+                onClick={async () => {
+                  const url = dlServer.replace(/\/+$/, "").trim()
+                  if (!url) return
+                  setDlServerStatus("checking")
+                  try {
+                    const r = await fetch(`${url}/health`, { signal: AbortSignal.timeout(6_000) })
+                    const d = await r.json()
+                    if (d.ok && d.ytdlp) {
+                      localStorage.setItem("musicanaz_dl_server", url)
+                      setDlServer(url)
+                      setDlServerStatus("ok")
+                      setDlServerSaved(true)
+                    } else {
+                      setDlServerStatus("fail")
+                    }
+                  } catch {
+                    setDlServerStatus("fail")
+                  }
+                }}
+                disabled={dlServerStatus === "checking"}
+                className="rounded-xl h-10 px-4 text-sm"
+              >
+                {dlServerStatus === "checking" ? "Testing…" : "Test & Save"}
+              </Button>
+            </div>
+
+            {/* Feedback */}
+            {dlServerStatus === "ok" && (
+              <div className="flex items-center gap-2 text-xs text-green-400">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                Server is online and yt-dlp is ready. Downloads will use this server as fallback.
+              </div>
+            )}
+            {dlServerStatus === "fail" && (
+              <div className="flex items-center gap-2 text-xs text-red-400">
+                <AlertCircle className="w-3.5 h-3.5" />
+                Could not reach the server. Check the URL and make sure musicanaz-downloader.js is running.
+              </div>
+            )}
+            {dlServer && dlServerStatus === "idle" && (
+              <button
+                onClick={() => { localStorage.removeItem("musicanaz_dl_server"); setDlServer(""); setDlServerStatus("idle") }}
+                className="text-xs text-muted-foreground hover:text-destructive underline transition-colors"
+              >
+                Remove server
+              </button>
+            )}
+          </div>
+
+          {/* Setup guide */}
+          <div className="rounded-2xl bg-card/20 border border-dashed border-border/40 p-4 space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground">How to set up your own download server</p>
+            <ol className="text-xs text-muted-foreground/80 space-y-1 list-decimal list-inside">
+              <li>Install yt-dlp on any device (PC, VPS, or Termux on Android)</li>
+              <li>Copy <code className="bg-muted/60 rounded px-1">musicanaz-downloader.js</code> to that device</li>
+              <li>Run: <code className="bg-muted/60 rounded px-1">node musicanaz-downloader.js</code></li>
+              <li>Expose it publicly via Cloudflare Tunnel or ngrok</li>
+              <li>Paste the public URL above and tap Test &amp; Save</li>
+            </ol>
+            <p className="text-xs text-muted-foreground/60 pt-1">
+              Termux users: <code className="bg-muted/60 rounded px-1">pkg install yt-dlp nodejs</code> then run the server on your phone.
+            </p>
+          </div>
         </section>
 
       </div>

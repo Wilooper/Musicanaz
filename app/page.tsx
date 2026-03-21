@@ -6,13 +6,13 @@ import {
   Search, Music, Clock, Library, TrendingUp,
   BarChart3, Home, X, Loader2, ChevronRight,
   Mic2, Disc3, ListMusic, Radio, Video, Music2,
-  Settings, Globe, Play,
+  Settings, Globe, Play, ClipboardPaste,
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import SongCard from "@/components/song-card"
 import ImageWithFallback from "@/components/image-with-fallback"
-import { getRecentlyPlayed, getCountry, savePreferences } from "@/lib/storage"
+import { getRecentlyPlayed, getCountry, getPreferences, savePreferences } from "@/lib/storage"
 import type { Song, MusivaTrack } from "@/lib/types"
 import { useRouter } from "next/navigation"
 import { useAudio } from "@/lib/audio-context"
@@ -455,6 +455,16 @@ function PWAInstallBanner() {
 
 export default function HomePage() {
   const router = useRouter()
+  const { playSong } = useAudio()
+
+  // ── Share-to-Play state ────────────────────────────────────────────────
+  const [shareResolving, setShareResolving] = useState<"idle"|"loading"|"error">("idle")
+  const [shareTitle,     setShareTitle]     = useState("")
+
+  // ── Paste & Play state ─────────────────────────────────────────────────
+  const [pasteUrl,       setPasteUrl]       = useState<string | null>(null)  // detected YT URL
+  const [pasteLabel,     setPasteLabel]     = useState("")                   // display text
+  const [pasteLoading,   setPasteLoading]   = useState(false)
 
   // Search state
   const [searchQuery,     setSearchQuery]     = useState("")
@@ -482,10 +492,12 @@ export default function HomePage() {
   const [trendingCountry,    setTrendingCountry]    = useState("ZZ")
   const [trendingLimit,      setTrendingLimit]      = useState(20)
   const [trendingLoadingMore,setTrendingLoadingMore]= useState(false)
+  const [trendingSource,     setTrendingSource]     = useState("all")
   const [charts,          setCharts]          = useState<ChartsData>({ songs: [], videos: [], artists: [], trending: [] })
   const [chartsLoading,   setChartsLoading]   = useState(false)
   const [selectedRegion,  setSelectedRegion]  = useState("ZZ")
   const [chartsTab,       setChartsTab]       = useState<"songs" | "videos" | "trending">("songs")
+  const [chartsSource,    setChartsSource]    = useState("all")
   const [recentlyPlayed,  setRecentlyPlayed]  = useState<Song[]>([])
   const [activeView,      setActiveView]      = useState<View>("home")
 
@@ -495,8 +507,15 @@ export default function HomePage() {
   const searchedQuery   = useRef("")
   const resultsPushed   = useRef(false)
 
-  // Load country pref on mount
-  useEffect(() => { setSelectedRegion(getCountry()) }, [])
+  // Load country + source prefs on mount
+  useEffect(() => {
+    const prefs = getPreferences()
+    const c = prefs.country || "ZZ"
+    setSelectedRegion(c)
+    setTrendingCountry(c)
+    setTrendingSource(prefs.trendingSource || "all")
+    setChartsSource(prefs.chartsSource   || "all")
+  }, [])
 
   // Sync active view with browser history (hash-based)
   useEffect(() => {
@@ -561,45 +580,42 @@ export default function HomePage() {
     setTopPLLoading(false)
   }, []) // eslint-disable-line
 
-  const loadTrending = useCallback(async (country?: string, limit?: number) => {
+  const loadTrending = useCallback(async (country?: string, limit?: number, source?: string) => {
     setTrendingLoading(true)
     const c = country ?? trendingCountry
     const l = limit   ?? trendingLimit
+    const s = source  ?? trendingSource
     try {
-      let url: string
-      if (!c || c === "ZZ") {
-        url = `/api/musiva/trending?multi=1&limit=${l}`
-      } else {
-        url = `/api/musiva/trending?country=${c}&limit=${l}`
-      }
+      // v8: always pass country (ZZ = global), no multi=1
+      const url = `/api/musiva/trending?country=${c || "ZZ"}&limit=${l}&sources=${s}`
       const data = await fetch(url).then(r => r.json())
       setTrending(data.trending || [])
     } catch { setTrending([]) }
     setTrendingLoading(false)
-  }, [trendingCountry, trendingLimit])
+  }, [trendingCountry, trendingLimit, trendingSource])
 
   const loadMoreTrending = useCallback(async () => {
-    const newLimit = Math.min(trendingLimit + 10, 50)
+    const newLimit = Math.min(trendingLimit + 10, 100)  // v8 supports up to 100
     if (newLimit === trendingLimit) return
     setTrendingLoadingMore(true)
     try {
-      const c = trendingCountry
-      const url = (!c || c === "ZZ")
-        ? `/api/musiva/trending?multi=1&limit=${newLimit}`
-        : `/api/musiva/trending?country=${c}&limit=${newLimit}`
+      const url = `/api/musiva/trending?country=${trendingCountry || "ZZ"}&limit=${newLimit}&sources=${trendingSource}`
       const data = await fetch(url).then(r => r.json())
       setTrending(data.trending || [])
       setTrendingLimit(newLimit)
     } catch {}
     setTrendingLoadingMore(false)
-  }, [trendingCountry, trendingLimit])
+  }, [trendingCountry, trendingLimit, trendingSource])
 
 
 
-  const loadCharts = useCallback(async (country: string) => {
+  const loadCharts = useCallback(async (country: string, source?: string) => {
     setChartsLoading(true)
+    const s = source ?? chartsSource
     try {
-      const data = await fetch(`/api/musiva/charts?country=${country}`).then(r => r.json())
+      const data = await fetch(
+        `/api/musiva/charts?country=${country || "ZZ"}&sources=${s}`
+      ).then(r => r.json())
       setCharts({
         songs:    data.songs    || [],
         videos:   data.videos   || [],
@@ -608,11 +624,332 @@ export default function HomePage() {
       })
     } catch { setCharts({ songs: [], videos: [], artists: [], trending: [] }) }
     setChartsLoading(false)
-  }, [])
+  }, [chartsSource])
 
   useEffect(() => { loadHome(); loadRecentlyPlayed(); loadTopPlaylists() }, []) // eslint-disable-line
-  useEffect(() => { if (activeView === "trending") loadTrending() }, [activeView, trendingCountry]) // eslint-disable-line
-  useEffect(() => { if (activeView === "charts") loadCharts(selectedRegion) }, [activeView, selectedRegion]) // eslint-disable-line
+  useEffect(() => { if (activeView === "trending") loadTrending() }, [activeView, trendingCountry, trendingSource]) // eslint-disable-line
+  useEffect(() => { if (activeView === "charts") loadCharts(selectedRegion) }, [activeView, selectedRegion, chartsSource]) // eslint-disable-line
+
+  // ── Share-to-Play: handle ?share_url= (PWA Web Share Target) ────────────
+  useEffect(() => {
+    // ── Parse any YouTube URL → { videoId, startSeconds } ─────────────────
+    // Handles: watch?v=, youtu.be/, shorts/, embed/, live/, music.youtube.com
+    function parseYouTubeUrl(raw: string): { videoId: string; startSeconds: number } | null {
+      let url: URL
+      try { url = new URL(raw) } catch { return null }
+
+      const host = url.hostname.replace(/^www\./, "")
+      const isYT = host === "youtube.com" || host === "youtu.be" ||
+                   host === "music.youtube.com" || host === "m.youtube.com" ||
+                   host === "gaming.youtube.com"
+      if (!isYT) return null
+
+      let videoId = ""
+
+      if (host === "youtu.be") {
+        // https://youtu.be/ID?t=90
+        videoId = url.pathname.slice(1).split("/")[0]
+      } else {
+        const path = url.pathname
+        if (path.startsWith("/shorts/")) {
+          // https://youtube.com/shorts/ID
+          videoId = path.split("/shorts/")[1]?.split("/")[0] || ""
+        } else if (path.startsWith("/embed/")) {
+          videoId = path.split("/embed/")[1]?.split("/")[0] || ""
+        } else if (path.startsWith("/v/")) {
+          videoId = path.split("/v/")[1]?.split("/")[0] || ""
+        } else if (path.startsWith("/live/")) {
+          videoId = path.split("/live/")[1]?.split("/")[0] || ""
+        } else {
+          // /watch?v=ID  or  music.youtube.com/watch?v=ID
+          videoId = url.searchParams.get("v") || ""
+        }
+      }
+
+      // Clean the videoId (remove any trailing garbage)
+      videoId = videoId.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 11)
+      if (!videoId) return null
+
+      // ── Parse timestamp ──────────────────────────────────────────────────
+      // YouTube uses t= in query string, sometimes #t= in hash
+      // Formats: t=90  t=1m30s  t=1h2m3s  t=30s
+      const rawT = url.searchParams.get("t") ||
+                   url.searchParams.get("start") ||
+                   url.hash.replace(/^#t=/, "") || ""
+
+      let startSeconds = 0
+      if (rawT) {
+        if (/^\d+$/.test(rawT)) {
+          // Pure number of seconds: t=90
+          startSeconds = parseInt(rawT, 10)
+        } else {
+          // Human format: t=1h2m3s  or  t=1m30s  or  t=30s
+          const h = rawT.match(/(\d+)h/)?.[1] || "0"
+          const m = rawT.match(/(\d+)m/)?.[1] || "0"
+          const s = rawT.match(/(\d+)s/)?.[1] || "0"
+          startSeconds = parseInt(h) * 3600 + parseInt(m) * 60 + parseInt(s)
+        }
+      }
+
+      return { videoId, startSeconds }
+    }
+
+    // ── Read share_url from query string (set by PWA share_target) ────────
+    const sp       = new URLSearchParams(window.location.search)
+    // The share sheet sends the YouTube page URL in share_url,
+    // sometimes also in share_text (Chrome Android sends both).
+    const shareRaw = sp.get("share_url") || sp.get("share_text") || ""
+
+    if (!shareRaw) return
+
+    // Strip the share param from the browser URL immediately so
+    // a page refresh doesn't re-trigger the handler
+    const cleanUrl = window.location.pathname
+    window.history.replaceState({}, "", cleanUrl)
+
+    const parsed = parseYouTubeUrl(shareRaw)
+    if (!parsed) return  // not a YouTube URL, ignore silently
+
+    const { videoId, startSeconds } = parsed
+
+    // ── Fetch metadata and play ───────────────────────────────────────────
+    setShareResolving("loading")
+    setShareTitle("")
+
+    ;(async () => {
+      try {
+        // MUSIVA /song/<videoId> returns full track metadata
+        const res  = await fetch(`/api/musiva/song?video_id=${encodeURIComponent(videoId)}`)
+        const data = await res.json()
+
+        if (data.error || !data.title) throw new Error("No metadata")
+
+        // Normalise to Song shape (same as convertToSong)
+        const artistStr: string =
+          typeof data.artist === "string" ? data.artist :
+          data.artist?.name ?? 
+          (Array.isArray(data.artists)
+            ? data.artists.map((a: any) => typeof a === "string" ? a : a?.name || "").filter(Boolean).join(", ")
+            : "Unknown")
+
+        const thumb: string =
+          Array.isArray(data.thumbnails) && data.thumbnails.length
+            ? [...data.thumbnails].sort((a: any, b: any) => (b?.width || 0) - (a?.width || 0))[0]?.url || ""
+            : data.thumbnail || ""
+
+        const song = {
+          id:        videoId,
+          videoId:   videoId,
+          title:     data.title     || "Unknown",
+          artist:    artistStr      || "Unknown",
+          thumbnail: thumb,
+          album:     typeof data.album === "string" ? data.album : data.album?.name || "",
+          duration:  data.duration  || "",
+          type:      "musiva" as const,
+        }
+
+        setShareTitle(song.title)
+        setShareResolving("idle")
+
+        // Play from timestamp — playSong(song, isManual, startTime)
+        playSong(song, true, startSeconds)
+
+        // Navigate to player
+        router.push(
+          `/player?id=${encodeURIComponent(videoId)}` +
+          `&title=${encodeURIComponent(song.title)}` +
+          `&artist=${encodeURIComponent(song.artist)}` +
+          `&thumbnail=${encodeURIComponent(song.thumbnail)}` +
+          `&type=musiva` +
+          `&videoId=${encodeURIComponent(videoId)}` +
+          (startSeconds > 0 ? `&t=${startSeconds}` : "")
+        )
+
+      } catch {
+        // Metadata fetch failed — still play by videoId directly
+        // (YT iframe will load the video, upnext will fill in title)
+        setShareResolving("idle")
+        const fallback = {
+          id: videoId, videoId, title: "Loading…",
+          artist: "", thumbnail: "", type: "musiva" as const,
+        }
+        playSong(fallback, true, startSeconds)
+        router.push(
+          `/player?id=${encodeURIComponent(videoId)}` +
+          `&title=${encodeURIComponent("")}` +
+          `&artist=${encodeURIComponent("")}` +
+          `&thumbnail=&type=musiva` +
+          `&videoId=${encodeURIComponent(videoId)}` +
+          (startSeconds > 0 ? `&t=${startSeconds}` : "")
+        )
+      }
+    })()
+  }, []) // eslint-disable-line
+
+  // ── Paste & Play: watch clipboard for YouTube URLs ────────────────────
+  useEffect(() => {
+    // Re-used from the share handler — extract videoId + timestamp from any YT URL
+    function parseYT(raw: string): { videoId: string; startSeconds: number } | null {
+      let url: URL
+      try { url = new URL(raw.trim()) } catch { return null }
+      const host = url.hostname.replace(/^www\./, "")
+      const isYT = ["youtube.com","youtu.be","music.youtube.com",
+                    "m.youtube.com","gaming.youtube.com"].includes(host)
+      if (!isYT) return null
+      let videoId = ""
+      if (host === "youtu.be") {
+        videoId = url.pathname.slice(1).split("/")[0]
+      } else {
+        const p = url.pathname
+        if      (p.startsWith("/shorts/")) videoId = p.split("/shorts/")[1]?.split("/")[0] || ""
+        else if (p.startsWith("/embed/"))  videoId = p.split("/embed/")[1]?.split("/")[0]  || ""
+        else if (p.startsWith("/v/"))      videoId = p.split("/v/")[1]?.split("/")[0]      || ""
+        else if (p.startsWith("/live/"))   videoId = p.split("/live/")[1]?.split("/")[0]   || ""
+        else videoId = url.searchParams.get("v") || ""
+      }
+      videoId = videoId.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 11)
+      if (!videoId) return null
+      const rawT = url.searchParams.get("t") || url.searchParams.get("start") ||
+                   url.hash.replace(/^#t=/, "") || ""
+      let startSeconds = 0
+      if (rawT) {
+        if (/^\d+$/.test(rawT)) {
+          startSeconds = parseInt(rawT, 10)
+        } else {
+          const h = rawT.match(/(\d+)h/)?.[1] || "0"
+          const m = rawT.match(/(\d+)m/)?.[1] || "0"
+          const s = rawT.match(/(\d+)s/)?.[1] || "0"
+          startSeconds = parseInt(h)*3600 + parseInt(m)*60 + parseInt(s)
+        }
+      }
+      return { videoId, startSeconds }
+    }
+
+    // Format seconds → "1:30" for the button label
+    function fmtTime(s: number): string {
+      if (!s) return ""
+      const h = Math.floor(s / 3600)
+      const m = Math.floor((s % 3600) / 60)
+      const sec = s % 60
+      if (h > 0) return `${h}:${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}`
+      return `${m}:${String(sec).padStart(2,"0")}`
+    }
+
+    async function checkClipboard() {
+      try {
+        if (!navigator.clipboard?.readText) return
+        const text = await navigator.clipboard.readText()
+        const parsed = parseYT(text)
+        if (parsed) {
+          const ts = parsed.startSeconds
+          const label = ts > 0 ? `Play from ${fmtTime(ts)}` : "Play in Musicanaz"
+          setPasteUrl(text)
+          setPasteLabel(label)
+        } else {
+          setPasteUrl(null)
+        }
+      } catch {
+        // Permission denied or clipboard empty — hide button silently
+        setPasteUrl(null)
+      }
+    }
+
+    // Check when user switches back to the tab / app
+    const onVisible = () => { if (document.visibilityState === "visible") checkClipboard() }
+    const onFocus   = () => checkClipboard()
+
+    document.addEventListener("visibilitychange", onVisible)
+    window.addEventListener("focus", onFocus)
+    // Also check once on mount (handles page reload after copying)
+    checkClipboard()
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible)
+      window.removeEventListener("focus", onFocus)
+    }
+  }, []) // eslint-disable-line
+
+  // ── Paste & Play: execute when user taps the button ───────────────────
+  const handlePastePlay = async () => {
+    if (!pasteUrl || pasteLoading) return
+    setPasteLoading(true)
+
+    // Re-parse to get videoId + startSeconds cleanly
+    let url: URL; try { url = new URL(pasteUrl.trim()) } catch { setPasteLoading(false); return }
+    const host = url.hostname.replace(/^www\./, "")
+    let videoId = ""
+    if (host === "youtu.be") {
+      videoId = url.pathname.slice(1).split("/")[0]
+    } else {
+      const p = url.pathname
+      if      (p.startsWith("/shorts/")) videoId = p.split("/shorts/")[1]?.split("/")[0] || ""
+      else if (p.startsWith("/embed/"))  videoId = p.split("/embed/")[1]?.split("/")[0]  || ""
+      else if (p.startsWith("/v/"))      videoId = p.split("/v/")[1]?.split("/")[0]      || ""
+      else if (p.startsWith("/live/"))   videoId = p.split("/live/")[1]?.split("/")[0]   || ""
+      else videoId = url.searchParams.get("v") || ""
+    }
+    videoId = videoId.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 11)
+    if (!videoId) { setPasteLoading(false); return }
+
+    const rawT = url.searchParams.get("t") || url.searchParams.get("start") ||
+                 url.hash.replace(/^#t=/, "") || ""
+    let startSeconds = 0
+    if (rawT) {
+      if (/^\d+$/.test(rawT)) startSeconds = parseInt(rawT, 10)
+      else {
+        const h = rawT.match(/(\d+)h/)?.[1] || "0"
+        const m = rawT.match(/(\d+)m/)?.[1] || "0"
+        const s = rawT.match(/(\d+)s/)?.[1] || "0"
+        startSeconds = parseInt(h)*3600 + parseInt(m)*60 + parseInt(s)
+      }
+    }
+
+    try {
+      // Fetch metadata
+      const res  = await fetch(`/api/musiva/song?video_id=${encodeURIComponent(videoId)}`)
+      const data = await res.json()
+
+      const artistStr: string =
+        typeof data.artist === "string" ? data.artist :
+        data.artist?.name ??
+        (Array.isArray(data.artists)
+          ? data.artists.map((a: any) => typeof a === "string" ? a : a?.name || "").filter(Boolean).join(", ")
+          : "Unknown")
+
+      const thumb: string =
+        Array.isArray(data.thumbnails) && data.thumbnails.length
+          ? [...data.thumbnails].sort((a: any, b: any) => (b?.width||0)-(a?.width||0))[0]?.url || ""
+          : data.thumbnail || ""
+
+      const song = {
+        id: videoId, videoId,
+        title:     data.title  || "Unknown",
+        artist:    artistStr   || "Unknown",
+        thumbnail: thumb,
+        album:     typeof data.album === "string" ? data.album : data.album?.name || "",
+        duration:  data.duration || "",
+        type:      "musiva" as const,
+      }
+
+      playSong(song, true, startSeconds)
+      setPasteUrl(null)
+      router.push(
+        `/player?id=${encodeURIComponent(videoId)}` +
+        `&title=${encodeURIComponent(song.title)}` +
+        `&artist=${encodeURIComponent(song.artist)}` +
+        `&thumbnail=${encodeURIComponent(song.thumbnail)}` +
+        `&type=musiva&videoId=${encodeURIComponent(videoId)}` +
+        (startSeconds > 0 ? `&t=${startSeconds}` : "")
+      )
+    } catch {
+      // Metadata failed — play by videoId directly
+      playSong({ id: videoId, videoId, title: "Loading…", artist: "", thumbnail: "", type: "musiva" as const }, true, startSeconds)
+      setPasteUrl(null)
+      router.push(`/player?id=${encodeURIComponent(videoId)}&title=&artist=&thumbnail=&type=musiva&videoId=${encodeURIComponent(videoId)}${startSeconds > 0 ? `&t=${startSeconds}` : ""}`)
+    } finally {
+      setPasteLoading(false)
+    }
+  }
 
   // Suggestions
   const fetchSuggestions = useCallback(async (q: string) => {
@@ -630,6 +967,7 @@ export default function HomePage() {
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value
     setSearchQuery(val)
+    if (val) setPasteUrl(null)  // dismiss paste button while typing
     if (debounceRef.current) clearTimeout(debounceRef.current)
     if (!val.trim()) { setSuggestions([]); setShowSuggestions(false); return }
     debounceRef.current = setTimeout(() => fetchSuggestions(val), 280)
@@ -854,6 +1192,57 @@ export default function HomePage() {
             </div>
           </form>
 
+          {/* ── Paste & Play banner ── */}
+          {pasteUrl && !showSuggestions && (
+            <div
+              className="mt-2 flex items-center gap-2 px-3 py-2.5 rounded-2xl
+                         bg-primary/10 border border-primary/25
+                         animate-in slide-in-from-top-2 duration-200"
+            >
+              {/* Icon */}
+              <div className="w-8 h-8 rounded-xl bg-primary/15 flex items-center justify-center flex-shrink-0">
+                <ClipboardPaste className="w-4 h-4 text-primary" />
+              </div>
+
+              {/* Label */}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-primary leading-tight truncate">
+                  {pasteLabel || "Play in Musicanaz"}
+                </p>
+                <p className="text-xs text-muted-foreground truncate">
+                  YouTube link detected in clipboard
+                </p>
+              </div>
+
+              {/* Play button */}
+              <button
+                onClick={handlePastePlay}
+                disabled={pasteLoading}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl
+                           bg-primary text-primary-foreground text-xs font-semibold
+                           hover:bg-primary/90 transition-colors disabled:opacity-60
+                           flex-shrink-0"
+              >
+                {pasteLoading
+                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  : <Play className="w-3.5 h-3.5" fill="currentColor" />
+                }
+                {pasteLoading ? "Loading…" : "Play"}
+              </button>
+
+              {/* Dismiss */}
+              <button
+                onClick={() => setPasteUrl(null)}
+                className="w-7 h-7 rounded-full flex items-center justify-center
+                           hover:bg-white/10 transition-colors text-muted-foreground
+                           flex-shrink-0"
+                title="Dismiss"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {/* Suggestions */}
           {showSuggestions && suggestions.length > 0 && (
             <div ref={suggestionsRef} className="absolute top-full left-0 right-0 mt-1.5 bg-card/95 backdrop-blur-xl border border-border/50 rounded-2xl shadow-2xl overflow-hidden z-40">
@@ -1005,6 +1394,32 @@ export default function HomePage() {
               <h2 className="text-xl font-bold">Trending Now</h2>
             </div>
 
+            {/* Source pills */}
+            <div className="flex gap-1.5 overflow-x-auto pb-2 mb-3 scrollbar-hide">
+              {([
+                ["all",    "🎵 All"],
+                ["ytm",    "▶ YouTube"],
+                ["apple",  " Apple"],
+                ["deezer", "🎧 Deezer"],
+                ["lastfm", "📻 Last.fm"],
+              ] as const).map(([src, label]) => (
+                <button
+                  key={src}
+                  onClick={() => {
+                    setTrendingSource(src)
+                    savePreferences({ trendingSource: src })
+                    setTrending([])
+                  }}
+                  className={[
+                    "px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap border transition-all flex-shrink-0",
+                    trendingSource === src
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-card/40 text-muted-foreground border-border/40 hover:bg-card/70 hover:text-foreground",
+                  ].join(" ")}
+                >{label}</button>
+              ))}
+            </div>
+
             {/* Country pills */}
             <div className="flex gap-1.5 overflow-x-auto pb-2 mb-5 scrollbar-hide">
               {TRENDING_COUNTRIES.map(({ code, flag, name }) => (
@@ -1037,7 +1452,7 @@ export default function HomePage() {
                     <TrendingCard key={`${t.videoId || t.title}-${i}`} item={t} rank={i + 1} />
                   ))}
                 </div>
-                {trendingLimit < 50 && (
+                {trendingLimit < 100 && (
                   <LoadMoreBtn loading={trendingLoadingMore} onClick={loadMoreTrending} />
                 )}
               </>
@@ -1057,7 +1472,7 @@ export default function HomePage() {
         {/* ══ CHARTS ══ */}
         {activeView === "charts" && (
           <section>
-            <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
               <h2 className="text-xl font-bold">Top Charts</h2>
               {/* Region selector — scrollable on small screens */}
               <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
@@ -1074,6 +1489,31 @@ export default function HomePage() {
                 ))}
               </div>
             </div>
+
+              {/* Source pills */}
+              <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+                {([
+                  ["all",    "🎵 All"],
+                  ["ytm",    "▶ YouTube"],
+                  ["apple",  " Apple"],
+                  ["deezer", "🎧 Deezer"],
+                  ["lastfm", "📻 Last.fm"],
+                ] as const).map(([src, label]) => (
+                  <button
+                    key={src}
+                    onClick={() => {
+                      setChartsSource(src)
+                      savePreferences({ chartsSource: src })
+                    }}
+                    className={[
+                      "px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap border transition-all flex-shrink-0",
+                      chartsSource === src
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-card/40 text-muted-foreground border-border/40 hover:bg-card/70 hover:text-foreground",
+                    ].join(" ")}
+                  >{label}</button>
+                ))}
+              </div>
 
             {chartsLoading ? (
               <><ShelfSkeleton /></>
@@ -1109,6 +1549,21 @@ export default function HomePage() {
         )}
 
       </div>
+      {/* ── Share-to-Play loading overlay ── */}
+      {shareResolving === "loading" && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50"
+             style={{ animation: "fadeInUp 0.25s ease" }}>
+          <div className="flex items-center gap-3 px-4 py-3 rounded-2xl
+                          bg-card/90 border border-border/40 shadow-xl
+                          backdrop-blur-md min-w-[220px] max-w-[90vw]">
+            <Loader2 className="w-4 h-4 animate-spin text-primary flex-shrink-0" />
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">Opening in Musicanaz…</p>
+              <p className="text-xs text-muted-foreground">Fetching song info</p>
+            </div>
+          </div>
+        </div>
+      )}
       <PWAInstallBanner />
     </div>
   )

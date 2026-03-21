@@ -8,7 +8,7 @@ import {
 import type { LyricLine, LyricsResponse, Song, UpNextQueue } from "./types"
 import { recordListenSeconds, addToSongHistory, recordBadgeEvent, getPartyUsername } from "./storage"
 
-const LYRICS_API = "https://test-0k.onrender.com"
+const LYRICS_API = process.env.NEXT_PUBLIC_LYRICS_API_URL || "https://test-0k.onrender.com"
 const PARTY_SERVER = process.env.NEXT_PUBLIC_PARTY_SERVER || "https://y-brown-two.vercel.app"
 
 interface AudioContextType {

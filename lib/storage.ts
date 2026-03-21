@@ -375,6 +375,8 @@ export interface UserPreferences {
   transliterateLanguage: string      // target language for both
   crossfadeSecs:         number       // 0 = off, 2/4/6/8 = crossfade seconds
   reactionsEnabled:      boolean      // show emoji reaction bar in player
+  trendingSource:        string       // all | ytm | apple | deezer | lastfm
+  chartsSource:          string       // all | ytm | apple | deezer | lastfm
 }
 
 const DEFAULT_PREFS: UserPreferences = {
@@ -387,6 +389,8 @@ const DEFAULT_PREFS: UserPreferences = {
   transliterateLanguage: "English",
   crossfadeSecs:         0,
   reactionsEnabled:      true,
+  trendingSource:        "all",
+  chartsSource:          "all",
 }
 
 export function getPreferences(): UserPreferences {

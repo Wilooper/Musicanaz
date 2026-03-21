@@ -5,11 +5,19 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "display_override": ["standalone", "minimal-ui", "browser"],
+  "display_override": [
+    "standalone",
+    "minimal-ui",
+    "browser"
+  ],
   "orientation": "portrait-primary",
   "background_color": "#09090b",
   "theme_color": "#6366f1",
-  "categories": ["music", "entertainment", "lifestyle"],
+  "categories": [
+    "music",
+    "entertainment",
+    "lifestyle"
+  ],
   "lang": "en",
   "dir": "ltr",
   "handle_links": "preferred",
@@ -36,32 +44,64 @@
       "short_name": "Search",
       "description": "Search for songs, artists, and albums",
       "url": "/?focus=search",
-      "icons": [{ "src": "https://raw.githubusercontent.com/wilooper/Asset/main/logo.png", "sizes": "96x96" }]
+      "icons": [
+        {
+          "src": "https://raw.githubusercontent.com/wilooper/Asset/main/logo.png",
+          "sizes": "96x96"
+        }
+      ]
     },
     {
       "name": "Trending Charts",
       "short_name": "Trending",
       "description": "Browse trending songs from around the world",
       "url": "/?view=trending",
-      "icons": [{ "src": "https://raw.githubusercontent.com/wilooper/Asset/main/logo.png", "sizes": "96x96" }]
+      "icons": [
+        {
+          "src": "https://raw.githubusercontent.com/wilooper/Asset/main/logo.png",
+          "sizes": "96x96"
+        }
+      ]
     },
     {
       "name": "Your Library",
       "short_name": "Library",
       "description": "Open your music library",
       "url": "/library",
-      "icons": [{ "src": "https://raw.githubusercontent.com/wilooper/Asset/main/logo.png", "sizes": "96x96" }]
+      "icons": [
+        {
+          "src": "https://raw.githubusercontent.com/wilooper/Asset/main/logo.png",
+          "sizes": "96x96"
+        }
+      ]
     },
     {
       "name": "Moods & Genres",
       "short_name": "Moods",
       "description": "Browse music by mood and genre",
       "url": "/moods",
-      "icons": [{ "src": "https://raw.githubusercontent.com/wilooper/Asset/main/logo.png", "sizes": "96x96" }]
+      "icons": [
+        {
+          "src": "https://raw.githubusercontent.com/wilooper/Asset/main/logo.png",
+          "sizes": "96x96"
+        }
+      ]
     }
   ],
   "screenshots": [],
   "prefer_related_applications": false,
   "related_applications": [],
-  "edge_side_panel": { "preferred_width": 400 }
+  "edge_side_panel": {
+    "preferred_width": 400
+  },
+  "share_target": {
+    "action": "/",
+    "method": "GET",
+    "enctype": "application/x-www-form-urlencoded",
+    "params": {
+      "title": "share_title",
+      "text": "share_text",
+      "url": "share_url"
+    }
+  }
 }

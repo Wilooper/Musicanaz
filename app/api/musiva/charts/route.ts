@@ -1,44 +1,50 @@
-import { NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
+const BASE = process.env.MUSIVA_API_URL || "https://turbo-14uz.onrender.com"
 
-const DEEZER_CHART = process.env.DEEZER_CHART_URL || "https://api.deezer.com/chart"
-
-function mapDeezerTrack(t: any) {
-  return {
-    videoId:       "",
-    title:         t.title  || t.title_short || "Unknown",
-    artist:        t.artist?.name || "Unknown",
-    thumbnail:     t.album?.cover_big || t.album?.cover_medium || t.album?.cover || "",
-    duration:      t.duration ? `${Math.floor(t.duration / 60)}:${String(t.duration % 60).padStart(2, "0")}` : "",
-    album:         t.album?.title || "",
-    _deezerTitle:  t.title  || t.title_short || "",
-    _deezerArtist: t.artist?.name || "",
-    _deezer:       true,
-  }
-}
-
-function mapDeezerArtist(a: any) {
-  return {
-    name:           a.name || "Unknown",
-    thumbnail:      a.picture_big || a.picture_medium || a.picture || "",
-    browseId:       "",
-    _deezerArtist:  true,
-  }
-}
-
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const sp       = request.nextUrl.searchParams
+  const country  = sp.get("country")  || "ZZ"
+  const language = sp.get("language") || "en"
+  const sources  = sp.get("sources")  || "all"
   try {
-    const res = await fetch(DEEZER_CHART, { next: { revalidate: 600 } })
-    if (!res.ok) throw new Error(`Deezer returned ${res.status}`)
+    const res = await fetch(
+      `${BASE}/charts?country=${country}&language=${language}&sources=${sources}`,
+      { next: { revalidate: 600 } }
+    )
+    if (!res.ok) throw new Error(`${res.status}`)
     const data = await res.json()
 
-    const songs    = (data.tracks?.data  || []).map(mapDeezerTrack)
-    const artists  = (data.artists?.data || []).map(mapDeezerArtist)
+    // data.ytm_songs has videoId (playable), data.songs is Apple Music (no videoId)
+    // Prefer YTM songs for the songs tab; Apple Music is used only when YTM has nothing
+    const songs = (data.ytm_songs?.length ? data.ytm_songs : null)
+               || (data.songs?.length     ? data.songs     : null)
+               || (data.apple_music_top?.length ? data.apple_music_top : [])
+
+    // Trending: YTM trending first, then merged YTM songs
+    const trending = data.trending?.length ? data.trending
+                   : data.ytm_songs?.length ? data.ytm_songs
+                   : []
+
+    // Artists: combine YTM artists + Deezer artists, deduplicate by name
+    const ytmArtists    = Array.isArray(data.artists)       ? data.artists       : []
+    const deezerArtists = Array.isArray(data.deezer_artists) ? data.deezer_artists : []
+    const seenNames     = new Set<string>()
+    const artists       = [...ytmArtists, ...deezerArtists].filter(a => {
+      const n = (a?.name || a?.title || "").toLowerCase()
+      if (!n || seenNames.has(n)) return false
+      seenNames.add(n); return true
+    })
 
     return NextResponse.json({
       songs,
-      videos:   [],
+      videos:          data.videos          || [],
       artists,
-      trending: songs,
+      trending,
+      // Extra fields the UI can use if needed
+      apple_music_top: data.apple_music_top || [],
+      deezer_top:      data.deezer_top      || [],
+      lastfm_top:      data.lastfm_top      || [],
+      sources_used:    data.sources_used    || {},
     })
   } catch {
     return NextResponse.json({ songs: [], videos: [], artists: [], trending: [] })

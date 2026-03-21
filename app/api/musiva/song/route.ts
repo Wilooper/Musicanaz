@@ -1,27 +1,17 @@
 import { type NextRequest, NextResponse } from "next/server"
-
-const BASE_URL = process.env.MUSIVA_API_URL || "https://turbo-14uz.onrender.com"
+const BASE = process.env.MUSIVA_API_URL || "https://turbo-14uz.onrender.com"
 
 export async function GET(request: NextRequest) {
+  const sp       = request.nextUrl.searchParams
+  const videoId  = sp.get("video_id")
+  const country  = sp.get("country")  || "ZZ"
+  const language = sp.get("language") || "en"
+  if (!videoId) return NextResponse.json({ error: "Missing video_id" }, { status: 400 })
   try {
-    const searchParams = request.nextUrl.searchParams
-    const videoId = searchParams.get("video_id")
-
-    if (!videoId) {
-      return NextResponse.json({ error: "Missing 'video_id' parameter" }, { status: 400 })
-    }
-
-    const url = `${BASE_URL}/song/${videoId}`
-    const response = await fetch(url)
-
-    if (!response.ok) {
-      throw new Error(`API returned ${response.status}`)
-    }
-
-    const data = await response.json()
-    return NextResponse.json(data)
-  } catch (error) {
-    console.error("Song metadata error:", error)
+    const res = await fetch(`${BASE}/song/${encodeURIComponent(videoId)}?country=${country}&language=${language}`)
+    if (!res.ok) throw new Error(`${res.status}`)
+    return NextResponse.json(await res.json())
+  } catch {
     return NextResponse.json({ error: "Song metadata unavailable" }, { status: 500 })
   }
 }

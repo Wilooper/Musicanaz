@@ -1,29 +1,19 @@
 import { type NextRequest, NextResponse } from "next/server"
 const BASE = process.env.MUSIVA_API_URL || "https://turbo-14uz.onrender.com"
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ videoId: string }> }
-) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ videoId: string }> }) {
   const { videoId } = await params
+  const sp       = request.nextUrl.searchParams
+  const country  = sp.get("country")  || "ZZ"
+  const language = sp.get("language") || "en"
   try {
-    // Try as playlist first (strip VL prefix if present for safety)
     const cleanId = videoId.toUpperCase().startsWith("VL") ? videoId.slice(2) : videoId
-    const res = await fetch(`${BASE}/playlist/${encodeURIComponent(cleanId)}?limit=100`)
-    if (res.ok) {
-      const data = await res.json()
-      return NextResponse.json(data)
-    }
-    // Fallback: try original ID
-    const res2 = await fetch(`${BASE}/playlist/${encodeURIComponent(videoId)}?limit=100`)
-    if (res2.ok) {
-      const data = await res2.json()
-      return NextResponse.json(data)
-    }
-    // Final fallback: song metadata
-    const songRes = await fetch(`${BASE}/song/${encodeURIComponent(videoId)}`)
-    const songData = await songRes.json()
-    return NextResponse.json(songData)
+    const res = await fetch(`${BASE}/playlist/${encodeURIComponent(cleanId)}?limit=100&country=${country}&language=${language}`)
+    if (res.ok) return NextResponse.json(await res.json())
+    const res2 = await fetch(`${BASE}/playlist/${encodeURIComponent(videoId)}?limit=100&country=${country}&language=${language}`)
+    if (res2.ok) return NextResponse.json(await res2.json())
+    const songRes = await fetch(`${BASE}/song/${encodeURIComponent(videoId)}?country=${country}&language=${language}`)
+    return NextResponse.json(await songRes.json())
   } catch {
     return NextResponse.json({ error: "Not found" }, { status: 500 })
   }
