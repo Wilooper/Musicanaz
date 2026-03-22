@@ -882,9 +882,13 @@ function PlayerContent() {
     setDownloadProgress(100)
   }
 
-  // ── handleDownload ───────────────────────────────────────────────────────
-  // Priority: user's saved server → MUSIVA proxy
-  // No window.open — user stays on the player, progress shown in the button.
+  // ── handleDownload — 3-tier priority ───────────────────────────────────
+  // Tier 1: user's saved server (localStorage) — set in Settings
+  // Tier 2: NEXT_PUBLIC_YT_DL_SERVER env var  — set in Vercel for all users
+  // Tier 3: MUSIVA API via Next.js proxy       — always available fallback
+  //
+  // Tiers 1 & 2 call the server DIRECTLY from the browser.
+  // Tier 3 goes through /api/download/* (server-side proxy to MUSIVA).
   const handleDownload = async () => {
     if (!currentSong || downloadProgress !== null || downloaded) return
     const vid = currentSong.videoId || currentSong.id
@@ -896,12 +900,21 @@ function PlayerContent() {
     const filename = `${safe(currentSong.artist || "Unknown")} - ${safe(currentSong.title || "Unknown")}.mp3`
 
     try {
+      // Tier 1 — user's personal server (highest priority)
       const userServer = (localStorage.getItem(DL_SERVER_KEY) || "").trim().replace(/\/+$/, "")
       if (userServer) {
         await executeDownload(vid, filename, userServer, true)
+
+      // Tier 2 — Vercel env var (NEXT_PUBLIC_ so it's available in the browser)
+      } else if (process.env.NEXT_PUBLIC_YT_DL_SERVER) {
+        const envServer = process.env.NEXT_PUBLIC_YT_DL_SERVER.trim().replace(/\/+$/, "")
+        await executeDownload(vid, filename, envServer, true)
+
+      // Tier 3 — MUSIVA API through Next.js proxy (always available)
       } else {
         await executeDownload(vid, filename, "", false)
       }
+
       addToDownloaded({ ...currentSong, audioUrl: "", cachedAt: Date.now(), downloadedAt: Date.now() })
       setDownloaded(true)
     } catch (err: any) {
