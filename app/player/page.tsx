@@ -7,7 +7,7 @@ import {
   Volume2, VolumeX, Heart, ListPlus, AlignLeft,
   ListMusic, Music, GripVertical, Trash2, ChevronUp, ChevronDown as ChevronDownIcon,
   Zap, Download, Check, Radio, Loader2 as SpinnerIcon,
-  Type, Languages, Sparkles, RotateCcw, Share2, Link2 as Link,
+  Type, Languages, Sparkles, RotateCcw, Share2, Link2 as Link, AlignLeft,
   Maximize2, Timer, Users, QrCode, Copy, Clock, Smile, Star, X as XIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -17,7 +17,7 @@ import { useAudio } from "@/lib/audio-context"
 import {
   isLiked, toggleLike, getPlaylists,
   addSongToPlaylist, createPlaylist, addToRecentlyPlayed,
-  addToDownloaded, isDownloaded, getPreferences,
+  addToDownloaded, isDownloaded, getPreferences, savePreferences,
   getReactions, addReaction, type Reaction,
   getFavMoments, saveFavMoment, deleteFavMoment, type FavMoment,
 } from "@/lib/storage"
@@ -271,14 +271,17 @@ function PlayerContent() {
   const isDesktop = useMediaQuery("(min-width: 768px)")
   const router    = useRouter()
   const params    = useSearchParams()
-  const lyricsRef = useRef<HTMLDivElement>(null)
+  const lyricsRef         = useRef<HTMLDivElement>(null)
+  const fsUserScrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const userScrolledRef   = useRef(false)
 
   const [liked,              setLiked]              = useState(false)
   const [showPlaylistDlg,    setShowPlaylistDlg]    = useState(false)
   const [showNewPlaylistDlg, setShowNewPlaylistDlg] = useState(false)
   const [newPlaylistName,    setNewPlaylistName]    = useState("")
-  const [showLyrics,         setShowLyrics]         = useState(false)
-  const [lyricsFullscreen,   setLyricsFullscreen]   = useState(false)
+  const [showLyrics,            setShowLyrics]            = useState(false)
+  const [lyricsFullscreen,      setLyricsFullscreen]      = useState(false)
+  const [lyricsAutoScrollEnabled, setLyricsAutoScrollEnabled] = useState(() => getPreferences().lyricsAutoScroll ?? true)
   const [showQueue,          setShowQueue]          = useState(false)
   // SponsorBlock POI (highlight)
   const [highlight,          setHighlight]          = useState<number | null>(null)
@@ -534,14 +537,17 @@ function PlayerContent() {
   useEffect(() => {
     const container = lyricsRef.current
     if (!container || currentLyricIndex < 0) return
+    // In fullscreen mode respect the auto-scroll setting and user-scroll lock
+    if (lyricsFullscreen) {
+      if (!lyricsAutoScrollEnabled || userScrolledRef.current) return
+    }
     const el = container.querySelector(`[data-idx="${currentLyricIndex}"]`) as HTMLElement | null
     if (!el) return
-    // Scroll so active line is vertically centered in the container
     const containerH = container.clientHeight
     const elTop      = el.offsetTop
     const elH        = el.offsetHeight
     container.scrollTo({ top: elTop - containerH / 2 + elH / 2, behavior: "smooth" })
-  }, [currentLyricIndex])
+  }, [currentLyricIndex, lyricsFullscreen, lyricsAutoScrollEnabled])
 
   // Auto-open lyrics when a song starts and lyrics are loaded (optional UX improvement)
   useEffect(() => {
@@ -1289,158 +1295,90 @@ function PlayerContent() {
             )}
 
             {/* Fullscreen lyrics overlay */}
-            {lyricsFullscreen && !isPodcast && (
-              <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-xl flex flex-col animate-in fade-in zoom-in duration-300">
-                {/* Close button top left */}
-                <div className="absolute top-4 left-4 z-[60]">
-                  <Button
-                    variant="ghost" size="icon"
-                    onClick={() => setLyricsFullscreen(false)}
-                    className="rounded-full w-10 h-10 bg-white/10 backdrop-blur-md border border-white/10 text-white"
-                  >
-                    <ChevronDown className="w-6 h-6" />
-                  </Button>
-                </div>
+            {lyricsFullscreen && !isPodcast && (() => {
+              const fsPrefs = getPreferences()
+              const hasGroqKey = !!fsPrefs.groqApiKey
+              return (
+                <div className="fixed inset-0 z-50 flex flex-col animate-in fade-in zoom-in duration-300 overflow-hidden">
+                  {/* ── Background: blurred thumbnail OR solid dark ── */}
+                  {fsPrefs.blurThumbnailBg && displayThumbnail ? (
+                    <>
+                      <div
+                        className="absolute inset-0"
+                        style={{
+                          backgroundImage: `url(${displayThumbnail})`,
+                          backgroundSize: "cover",
+                          backgroundPosition: "center",
+                          filter: "blur(40px) brightness(0.25) saturate(1.4)",
+                          transform: "scale(1.15)",
+                        }}
+                      />
+                      <div className="absolute inset-0 bg-black/50" />
+                    </>
+                  ) : (
+                    <div className="absolute inset-0 bg-black/96" />
+                  )}
 
-                {/* ── Lyrics scroll area ── */}
-                <div
-                  ref={lyricsRef}
-                  className="flex-1 overflow-y-auto px-6 pt-16 pb-20 scrollbar-hide"
-                >
-                  <div className="max-w-lg mx-auto">
-                    {/* Song title */}
-                    <p className="text-center text-xs text-white/30 mb-1 uppercase tracking-widest truncate">
-                      {currentSong?.title}
-                    </p>
-                    <p className="text-center text-[10px] text-white/20 mb-5 truncate">{currentSong?.artist}</p>
+                  {/* ── Top bar ── */}
+                  <div className="relative z-[60] flex items-center justify-between px-4 pt-4 pb-2 flex-shrink-0">
+                    <Button
+                      variant="ghost" size="icon"
+                      onClick={() => setLyricsFullscreen(false)}
+                      className="rounded-full w-10 h-10 bg-white/10 backdrop-blur-md border border-white/10 text-white"
+                    >
+                      <ChevronDown className="w-6 h-6" />
+                    </Button>
 
-                    {/* AI mode badge */}
-                    {aiMode && aiLines && (
-                      <div className="flex items-center justify-center gap-2 mb-4">
-                        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/20 border border-primary/30 text-primary text-xs font-medium">
-                          <Sparkles className="w-3 h-3" />
-                          {aiMode === "transliterate" ? "Transliterated" : "Translated"}
-                          {" · "}
-                          {getPreferences().transliterateLanguage || "English"}
-                        </div>
-                        <button
-                          onClick={() => { setAiLines(null); setAiMode(null) }}
-                          className="p-1 text-white/30 hover:text-white/70 transition-colors"
-                        >
-                          <RotateCcw className="w-3 h-3" />
-                        </button>
-                      </div>
-                    )}
+                    {/* Song info centered */}
+                    <div className="flex-1 text-center px-3 min-w-0">
+                      <p className="text-xs text-white/50 font-medium truncate">{currentSong?.title}</p>
+                      <p className="text-[10px] text-white/30 truncate">{currentSong?.artist}</p>
+                    </div>
 
-                    {/* Error state */}
-                    {aiError && (
-                      <p className="text-center text-xs text-red-400/80 mb-3 bg-red-500/10 rounded-xl px-3 py-2">
-                        {aiError}
-                      </p>
-                    )}
-
-                    {/* Lyrics loading */}
-                    {lyricsLoading ? (
-                      <div className="flex flex-col items-center gap-3 py-16">
-                        <div className="flex gap-1.5">
-                          {[0,1,2].map(i => (
-                            <span key={i} className="w-2 h-2 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: `${i*0.15}s` }} />
-                          ))}
-                        </div>
-                        <p className="text-sm text-white/40">Loading lyrics…</p>
-                      </div>
-                    ) : aiLoading ? (
-                      <div className="flex flex-col items-center gap-3 py-10">
-                        <div className="flex gap-1.5">
-                          {[0,1,2,3].map(i => (
-                            <span key={i} className="w-2 h-2 rounded-full bg-primary/70 animate-bounce" style={{ animationDelay: `${i*0.12}s` }} />
-                          ))}
-                        </div>
-                        <p className="text-sm text-white/50">
-                          {aiMode === "transliterate" ? "Transliterating…" : "Translating…"}
-                        </p>
-                        <p className="text-xs text-white/25">Powered by Llama 3.3 via Groq</p>
-                      </div>
-                    ) : lyrics.length > 0 ? (
-                      <div className="space-y-4 pb-8">
-                        {lyrics.map((line, idx) => {
-                          const isActive = idx === currentLyricIndex
-                          const isNear   = idx === currentLyricIndex - 1 || idx === currentLyricIndex + 1
-                          const aiText   = aiLines?.[idx]
-                          return (
-                            <div
-                              key={line.id}
-                              data-idx={idx}
-                              onClick={(e) => {
-                                e.preventDefault()
-                                e.stopPropagation()
-                                seek(line.start_time / 1000)
-                              }}
-                              className={`text-center transition-all duration-300 cursor-pointer select-none py-2 ${
-                                isActive ? "scale-100" : "scale-[0.97] hover:scale-[0.99]"
-                              }`}
-                            >
-                              {/* Original line */}
-                              <p className={`font-semibold leading-snug transition-all duration-300 ${
-                                isActive
-                                  ? "text-white text-xl opacity-100"
-                                  : isNear
-                                    ? "text-white/45 text-base"
-                                    : "text-white/15 text-sm hover:text-white/30"
-                              }`}>
-                                {line.text}
-                              </p>
-                              {/* AI transformed line */}
-                              {aiText && (
-                                <p className={`font-medium mt-0.5 transition-all duration-300 ${
-                                  isActive
-                                    ? "text-primary text-base opacity-100"
-                                    : isNear
-                                      ? "text-primary/40 text-sm"
-                                      : "text-primary/15 text-xs"
-                                }`}>
-                                  {aiText}
-                                </p>
-                              )}
-                            </div>
-                          )
-                        })}
-                      </div>
-                    ) : (
-                      <p className="text-center text-white/40 text-lg py-16">No lyrics found</p>
-                    )}
+                    {/* Auto-scroll toggle pill */}
+                    <button
+                      onClick={() => {
+                        const next = !lyricsAutoScrollEnabled
+                        setLyricsAutoScrollEnabled(next)
+                        savePreferences({ lyricsAutoScroll: next })
+                        userScrolledRef.current = false
+                      }}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                        lyricsAutoScrollEnabled
+                          ? "bg-primary/20 text-primary border-primary/30"
+                          : "bg-white/5 text-white/40 border-white/10"
+                      }`}
+                    >
+                      <AlignLeft className="w-3 h-3" />
+                      {lyricsAutoScrollEnabled ? "Auto" : "Manual"}
+                    </button>
                   </div>
-                </div>
 
-                {/* ── AI action bar (only when lyrics loaded & key is set) ── */}
-                {lyrics.length > 0 && (() => {
-                  const prefs = getPreferences()
-                  const hasKey = !!prefs.groqApiKey
-                  if (!hasKey) return null
-                  return (
-                    <div className="flex-shrink-0 flex items-center justify-center gap-2 px-6 py-2 border-t border-white/5">
-                      {prefs.transliterateEnabled && (
+                  {/* ── AI badge + action buttons (always visible if key set) ── */}
+                  {lyrics.length > 0 && hasGroqKey && (
+                    <div className="relative z-[60] flex items-center justify-center gap-2 px-4 pb-2 flex-shrink-0 flex-wrap">
+                      {fsPrefs.transliterateEnabled && (
                         <button
                           onClick={() => handleAiTransform("transliterate")}
                           disabled={aiLoading}
                           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
                             aiMode === "transliterate" && aiLines
                               ? "bg-primary text-primary-foreground border-primary"
-                              : "bg-white/5 text-white/60 border-white/10 hover:bg-white/10 hover:text-white disabled:opacity-40"
+                              : "bg-white/5 text-white/50 border-white/10 hover:bg-white/10 hover:text-white disabled:opacity-40"
                           }`}
                         >
                           <Type className="w-3 h-3" />
                           Romanize
                         </button>
                       )}
-                      {prefs.translationEnabled && (
+                      {fsPrefs.translationEnabled && (
                         <button
                           onClick={() => handleAiTransform("translate")}
                           disabled={aiLoading}
                           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
                             aiMode === "translate" && aiLines
                               ? "bg-primary text-primary-foreground border-primary"
-                              : "bg-white/5 text-white/60 border-white/10 hover:bg-white/10 hover:text-white disabled:opacity-40"
+                              : "bg-white/5 text-white/50 border-white/10 hover:bg-white/10 hover:text-white disabled:opacity-40"
                           }`}
                         >
                           <Languages className="w-3 h-3" />
@@ -1457,58 +1395,171 @@ function PlayerContent() {
                         </button>
                       )}
                     </div>
-                  )
-                })()}
+                  )}
 
-                {/* ── Mini player controls ── */}
-                <div className="flex-shrink-0 border-t border-white/10 bg-black/60 backdrop-blur-md px-6 pt-3 pb-6">
-                  <div className="flex items-center gap-3 mb-3">
-                    <ImageWithFallback src={displayThumbnail} alt={displayTitle} className="w-10 h-10 rounded-xl object-cover flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-sm truncate text-white">{displayTitle}</p>
-                      <p className="text-xs text-white/50 truncate">{displayArtist}</p>
+                  {/* ── Lyrics scroll area ── */}
+                  <div
+                    ref={lyricsRef}
+                    onTouchStart={() => {
+                      userScrolledRef.current = true
+                      if (fsUserScrollTimer.current) clearTimeout(fsUserScrollTimer.current)
+                    }}
+                    onTouchEnd={() => {
+                      if (fsUserScrollTimer.current) clearTimeout(fsUserScrollTimer.current)
+                      fsUserScrollTimer.current = setTimeout(() => {
+                        userScrolledRef.current = false
+                      }, 4000)
+                    }}
+                    onWheel={() => {
+                      userScrolledRef.current = true
+                      if (fsUserScrollTimer.current) clearTimeout(fsUserScrollTimer.current)
+                      fsUserScrollTimer.current = setTimeout(() => {
+                        userScrolledRef.current = false
+                      }, 4000)
+                    }}
+                    className="relative z-10 flex-1 overflow-y-auto px-6 pt-4 pb-6"
+                    style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y" }}
+                  >
+                    <div className="max-w-lg mx-auto">
+
+                      {/* AI mode badge */}
+                      {aiMode && aiLines && (
+                        <div className="flex items-center justify-center gap-2 mb-5">
+                          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/20 border border-primary/30 text-primary text-xs font-medium">
+                            <Sparkles className="w-3 h-3" />
+                            {aiMode === "transliterate" ? "Transliterated" : "Translated"}
+                            {" · "}
+                            {fsPrefs.transliterateLanguage || "English"}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Error state */}
+                      {aiError && (
+                        <p className="text-center text-xs text-red-400/80 mb-3 bg-red-500/10 rounded-xl px-3 py-2">
+                          {aiError}
+                        </p>
+                      )}
+
+                      {/* Lyrics loading */}
+                      {lyricsLoading ? (
+                        <div className="flex flex-col items-center gap-3 py-16">
+                          <div className="flex gap-1.5">
+                            {[0,1,2].map(i => (
+                              <span key={i} className="w-2 h-2 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: `${i*0.15}s` }} />
+                            ))}
+                          </div>
+                          <p className="text-sm text-white/40">Loading lyrics…</p>
+                        </div>
+                      ) : aiLoading ? (
+                        <div className="flex flex-col items-center gap-3 py-10">
+                          <div className="flex gap-1.5">
+                            {[0,1,2,3].map(i => (
+                              <span key={i} className="w-2 h-2 rounded-full bg-primary/70 animate-bounce" style={{ animationDelay: `${i*0.12}s` }} />
+                            ))}
+                          </div>
+                          <p className="text-sm text-white/50">
+                            {aiMode === "transliterate" ? "Transliterating…" : "Translating…"}
+                          </p>
+                          <p className="text-xs text-white/25">Powered by Llama 3.3 via Groq</p>
+                        </div>
+                      ) : lyrics.length > 0 ? (
+                        <div className="space-y-1 pb-8">
+                          {lyrics.map((line, idx) => {
+                            const isActive = idx === currentLyricIndex
+                            const aiText   = aiLines?.[idx]
+                            return (
+                              <div
+                                key={line.id}
+                                data-idx={idx}
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  seek(line.start_time / 1000)
+                                  userScrolledRef.current = false
+                                }}
+                                className="text-center cursor-pointer select-none py-2.5 px-2 rounded-xl transition-colors hover:bg-white/5 active:bg-white/10"
+                              >
+                                {/* Original line — no blur, just opacity shift */}
+                                <p className={`font-semibold leading-relaxed transition-all duration-200 ${
+                                  isActive
+                                    ? "text-white text-xl"
+                                    : "text-white/55 text-base hover:text-white/75"
+                                }`}>
+                                  {line.text}
+                                </p>
+                                {/* AI transformed line */}
+                                {aiText && (
+                                  <p className={`font-medium mt-0.5 transition-all duration-200 ${
+                                    isActive
+                                      ? "text-primary text-base"
+                                      : "text-primary/45 text-sm hover:text-primary/65"
+                                  }`}>
+                                    {aiText}
+                                  </p>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <p className="text-center text-white/40 text-lg py-16">No lyrics found</p>
+                      )}
                     </div>
-                    <button
-                      onClick={() => setLyricsFullscreen(false)}
-                      className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white/60 hover:text-white transition-colors flex-shrink-0"
-                    >
-                      <ChevronDown className="w-4 h-4" />
-                    </button>
                   </div>
-                  <Slider
-                    value={[currentTime]}
-                    max={duration || 100}
-                    step={0.5}
-                    onValueChange={([v]) => seek(v)}
-                    className="mb-1"
-                  />
-                  <div className="flex justify-between text-[10px] text-white/30 mb-3 tabular-nums">
-                    <span>{fmt(currentTime)}</span><span>{fmt(duration)}</span>
+
+                  {/* ── Mini player controls ── */}
+                  <div className="relative z-[60] flex-shrink-0 border-t border-white/10 bg-black/50 backdrop-blur-md px-6 pt-3 pb-safe-or-6">
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="w-11 h-11 rounded-xl overflow-hidden flex-shrink-0 shadow-lg">
+                        <ImageWithFallback src={displayThumbnail} alt={displayTitle} className="w-full h-full object-cover" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-sm truncate text-white">{displayTitle}</p>
+                        <p className="text-xs text-white/50 truncate">{displayArtist}</p>
+                      </div>
+                      <button
+                        onClick={() => setLyricsFullscreen(false)}
+                        className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white/60 hover:text-white transition-colors flex-shrink-0"
+                      >
+                        <ChevronDown className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <Slider
+                      value={[currentTime]}
+                      max={duration || 100}
+                      step={0.5}
+                      onValueChange={([v]) => seek(v)}
+                      className="mb-1"
+                    />
+                    <div className="flex justify-between text-[10px] text-white/30 mb-3 tabular-nums">
+                      <span>{fmt(currentTime)}</span><span>{fmt(duration)}</span>
+                    </div>
+                    <div className="flex items-center justify-center gap-8">
+                      <button onClick={playPrev} className="p-2 text-white/60 hover:text-white transition-colors">
+                        <SkipBack className="w-5 h-5" />
+                      </button>
+                      <button
+                        onClick={togglePlayPause}
+                        disabled={isLoading}
+                        className="w-14 h-14 rounded-full bg-primary hover:bg-primary/90 flex items-center justify-center shadow-2xl shadow-primary/40 transition-all active:scale-95 disabled:opacity-60"
+                      >
+                        {isLoading
+                          ? <div className="w-5 h-5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
+                          : isPlaying
+                            ? <Pause className="w-6 h-6 text-primary-foreground" fill="currentColor" />
+                            : <Play className="w-6 h-6 text-primary-foreground ml-0.5" fill="currentColor" />
+                        }
+                      </button>
+                      <button onClick={playNext} className="p-2 text-white/60 hover:text-white transition-colors">
+                        <SkipForward className="w-5 h-5" />
+                      </button>
+                    </div>
+                    <p className="text-center text-[9px] text-white/20 mt-2">tap a line to seek</p>
                   </div>
-                  <div className="flex items-center justify-center gap-8">
-                    <button onClick={playPrev} className="p-2 text-white/60 hover:text-white transition-colors">
-                      <SkipBack className="w-5 h-5" />
-                    </button>
-                    <button
-                      onClick={togglePlayPause}
-                      disabled={isLoading}
-                      className="w-14 h-14 rounded-full bg-primary hover:bg-primary/90 flex items-center justify-center shadow-2xl shadow-primary/40 transition-all active:scale-95 disabled:opacity-60"
-                    >
-                      {isLoading
-                        ? <div className="w-5 h-5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
-                        : isPlaying
-                          ? <Pause className="w-6 h-6 text-primary-foreground" fill="currentColor" />
-                          : <Play className="w-6 h-6 text-primary-foreground ml-0.5" fill="currentColor" />
-                      }
-                    </button>
-                    <button onClick={playNext} className="p-2 text-white/60 hover:text-white transition-colors">
-                      <SkipForward className="w-5 h-5" />
-                    </button>
-                  </div>
-                  <p className="text-center text-[9px] text-white/20 mt-2">tap line to seek</p>
                 </div>
-              </div>
-            )}
+              )
+            })()}
 
             {/* SponsorBlock highlight skip button */}
             {showHighlightBtn && highlight !== null && (

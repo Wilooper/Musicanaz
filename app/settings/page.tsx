@@ -8,6 +8,7 @@ import {
   Key, Eye, EyeOff, Type, Sparkles, X as XIcon,
   Clock, BarChart2, Trash2, Calendar, User, Zap,
   Download, Upload, AlertCircle, CheckCircle2,
+  Image as ImageIcon, AlignLeft,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import ImageWithFallback from "@/components/image-with-fallback"
@@ -70,6 +71,7 @@ export default function SettingsPage() {
     groqApiKey: "", transliterateEnabled: true,
     translationEnabled: true, transliterateLanguage: "English",
     trendingSource: "all", chartsSource: "all",
+    blurThumbnailBg: false, lyricsAutoScroll: true,
   })
   const [saved,           setSaved]           = useState(false)
   const [showCountryList, setShowCountryList] = useState(false)
@@ -197,6 +199,48 @@ export default function SettingsPage() {
             <div className="flex justify-between text-[10px] text-muted-foreground/50 mt-1.5 px-1">
               <span>Off</span><span>2s</span><span>4s</span><span>6s</span><span>8s</span>
             </div>
+          </div>
+
+
+
+          {/* Blur Thumbnail Background toggle */}
+          <div className="rounded-2xl bg-card/40 border border-border/30 px-4 py-3.5 flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+              <ImageIcon className="w-4 h-4 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Blur Thumbnail Background</p>
+              <p className="text-xs text-muted-foreground">Show blurred album art instead of black in fullscreen lyrics</p>
+            </div>
+            <button
+              onClick={() => {
+                const next = savePreferences({ blurThumbnailBg: !prefs.blurThumbnailBg })
+                setPrefs(next); setSaved(true); setTimeout(() => setSaved(false), 1800)
+              }}
+              className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${prefs.blurThumbnailBg ? "bg-primary" : "bg-muted"}`}
+            >
+              <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${prefs.blurThumbnailBg ? "translate-x-5" : "translate-x-0.5"}`} />
+            </button>
+          </div>
+
+          {/* Auto-Scroll Lyrics toggle */}
+          <div className="rounded-2xl bg-card/40 border border-border/30 px-4 py-3.5 flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+              <AlignLeft className="w-4 h-4 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Auto-Scroll Lyrics</p>
+              <p className="text-xs text-muted-foreground">Automatically scroll to the active line in fullscreen lyrics</p>
+            </div>
+            <button
+              onClick={() => {
+                const next = savePreferences({ lyricsAutoScroll: !prefs.lyricsAutoScroll })
+                setPrefs(next); setSaved(true); setTimeout(() => setSaved(false), 1800)
+              }}
+              className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${prefs.lyricsAutoScroll ? "bg-primary" : "bg-muted"}`}
+            >
+              <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${prefs.lyricsAutoScroll ? "translate-x-5" : "translate-x-0.5"}`} />
+            </button>
           </div>
 
           {/* Emoji Reactions toggle */}

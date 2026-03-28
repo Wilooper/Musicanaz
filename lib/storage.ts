@@ -377,6 +377,8 @@ export interface UserPreferences {
   reactionsEnabled:      boolean      // show emoji reaction bar in player
   trendingSource:        string       // all | ytm | apple | deezer | lastfm
   chartsSource:          string       // all | ytm | apple | deezer | lastfm
+  blurThumbnailBg:       boolean      // fullscreen lyrics: blur thumbnail instead of black
+  lyricsAutoScroll:      boolean      // fullscreen lyrics: auto-scroll to active line
 }
 
 const DEFAULT_PREFS: UserPreferences = {
@@ -391,6 +393,8 @@ const DEFAULT_PREFS: UserPreferences = {
   reactionsEnabled:      true,
   trendingSource:        "all",
   chartsSource:          "all",
+  blurThumbnailBg:       false,
+  lyricsAutoScroll:      true,
 }
 
 export function getPreferences(): UserPreferences {
