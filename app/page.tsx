@@ -1293,157 +1293,6 @@ export default function HomePage() {
                 </button>
                 <button
                   type="button"
-                  title={aiEnabled ? "AI Search ON" : "AI Search OFF"}
-                  onClick={() => { const n = !aiEnabled; setAiEnabled(n); setAISearchEnabled(n) }}
-                  className={[
-                    "flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border transition-all mr-0.5",
-                    aiEnabled
-                      ? "bg-primary text-primary-foreground border-primary shadow-sm shadow-primary/30"
-                      : "bg-card/60 text-muted-foreground border-border/40 hover:border-primary/40",
-                  ].join(" ")}
-                >
-                  {aiSearchLoading
-                    ? <Loader2 className="w-3 h-3 animate-spin" />
-                    : <Sparkles className="w-3 h-3" />}
-                  <span className="hidden sm:inline">AI</span>
-                </button>
-                {searchQuery && (
-                  <button type="button" onClick={clearSearch} className="w-6 h-6 rounded-full flex items-center justify-center hover:bg-muted transition-colors">
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-            </div>
-          </form>
-
-          {/* ── Paste & Play banner ── */}
-          {pasteUrl && !showSuggestions && (
-            <div
-              className="mt-2 flex items-center gap-2 px-3 py-2.5 rounded-2xl
-                         bg-primary/10 border border-primary/25
-                         animate-in slide-in-from-top-2 duration-200"
-            >
-              {/* Icon */}
-              <div className="w-8 h-8 rounded-xl bg-primary/15 flex items-center justify-center flex-shrink-0">
-                <ClipboardPaste className="w-4 h-4 text-primary" />
-              </div>
-
-              {/* Label */}
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-primary leading-tight truncate">
-                  {pasteLabel || "Play in Musicanaz"}
-                </p>
-                <p className="text-xs text-muted-foreground truncate">
-                  YouTube link detected in clipboard
-                </p>
-              </div>
-
-              {/* Play button */}
-              <button
-                onClick={handlePastePlay}
-                disabled={pasteLoading}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl
-                           bg-primary text-primary-foreground text-xs font-semibold
-                           hover:bg-primary/90 transition-colors disabled:opacity-60
-                           flex-shrink-0"
-              >
-                {pasteLoading
-                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  : <Play className="w-3.5 h-3.5" fill="currentColor" />
-                }
-                {pasteLoading ? "Loading…" : "Play"}
-              </button>
-
-              {/* Dismiss */}
-              <button
-                onClick={() => setPasteUrl(null)}
-                className="w-7 h-7 rounded-full flex items-center justify-center
-                           hover:bg-white/10 transition-colors text-muted-foreground
-                           flex-shrink-0"
-                title="Dismiss"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          )}
-
-          {/* Suggestions */}
-          {showSuggestions && suggestions.length > 0 && (
-            <div ref={suggestionsRef} className="absolute top-full left-0 right-0 mt-1.5 bg-card/95 backdrop-blur-xl border border-border/50 rounded-2xl shadow-2xl overflow-hidden z-40">
-              {suggestions.map((s, i) => (
-                <button
-                  key={i}
-                  onClick={() => handleSuggestionClick(s)}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-primary/8 transition-colors text-left"
-                >
-                  <Search className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-                  <span className="flex-1 truncate">{s}</span>
-                  <ChevronRight className="w-3 h-3 text-muted-foreground/40" />
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* ── Nav pills ── */}
-        {activeView !== "results" && (
-          <div className="flex items-center justify-center gap-2 mb-8 flex-wrap">
-            {(["home", "trending", "charts", "radio"] as View[]).map(v => (
-              <Button
-                key={v}
-                variant={activeView === v ? "default" : "ghost"}
-                size="sm"
-                className="rounded-full px-5 gap-1.5 capitalize"
-                onClick={() => handleNavChange(v)}
-              >
-                {v === "home"     && <Home      className="w-3.5 h-3.5" />}
-                {v === "trending" && <TrendingUp className="w-3.5 h-3.5" />}
-                {v === "charts"   && <BarChart3  className="w-3.5 h-3.5" />}
-                {v === "radio"    && <Radio      className="w-3.5 h-3.5" />}
-                {v}
-              </Button>
-            ))}
-          </div>
-        )}
-
-        {/* ══ RESULTS ══ */}
-        {activeView === "results" && (
-          <section>
-            <div className="flex items-center gap-3 mb-4">
-              <button onClick={clearSearch} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors">
-                <ChevronRight className="w-4 h-4 rotate-180" />Back
-              </button>
-              <h2 className="text-base font-bold truncate">"{searchedQuery.current}"</h2>
-            </div>
-
-            {/* Filter tabs */}
-            <div className="flex gap-1.5 mb-5 overflow-x-auto pb-1 scrollbar-hide">
-              {FILTER_TABS.map(({ key, label, icon }) => (
-                <button
-                  key={key}
-                  onClick={() => handleFilterChange(key)}
-                  className={[
-                    "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-all border flex-shrink-0",
-                    activeFilter === key
-                      ? "bg-primary text-primary-foreground border-primary"
-                      : "bg-card/40 text-muted-foreground border-border/40 hover:bg-card/70 hover:text-foreground",
-                  ].join(" ")}
-                >
-                  {icon}{label}
-                  {searchResults[key].length > 0 && (
-                    <span className={`ml-0.5 text-[10px] px-1.5 py-0.5 rounded-full ${activeFilter === key ? "bg-white/20" : "bg-muted"}`}>
-                      {searchResults[key].length}
-                    </span>
-                  )}
-                </button>
-              ))}
-            </div>
-
-            {/* AI personalised badge */}
-                <span className="font-medium">Personalised results</span>
-                <span className="text-muted-foreground">· sorted by your taste</span>
-              </div>
-            )}
             {aiEnabled && aiSearchBadge && activeFilter === "songs" && (
               <div className="flex items-center gap-1.5 mb-3 text-xs text-primary">
                 <Sparkles className="w-3 h-3" />
@@ -1458,6 +1307,90 @@ export default function HomePage() {
         {/* ══ HOME ══ */}
         {activeView === "home" && (
           <div>
+            {/* ── AI Analysis + Recommendations ── */}
+            {aiEnabled && (
+              <section className="mb-8">
+                <div className="rounded-2xl bg-card/40 border border-border/30 p-4 mb-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Brain className="w-4 h-4 text-primary" />
+                    <h2 className="text-base font-bold">AI Analysis</h2>
+                    {localStats && (
+                      <span className="ml-auto text-xs text-muted-foreground font-mono">
+                        {localStats.total_plays} plays · {localStats.liked} liked · {localStats.skipped} skipped
+                      </span>
+                    )}
+                  </div>
+                  {!aiAnalysis && !aiAnalyzing && (
+                    <div className="flex flex-col items-center gap-3 py-4 text-center">
+                      <Zap className="w-8 h-8 text-primary/30" />
+                      <p className="text-sm font-medium">No analysis yet</p>
+                      <p className="text-xs text-muted-foreground max-w-xs">Play a few songs then run the AI. It classifies your taste via MusicBrainz.</p>
+                      {aiAnalysisError && <p className="text-xs text-destructive">{aiAnalysisError}</p>}
+                      <button onClick={handleRunAnalysis} disabled={aiAnalyzing}
+                        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-50">
+                        {aiAnalyzing ? <Loader2 className="w-4 h-4 animate-spin"/> : <Sparkles className="w-4 h-4"/>}
+                        {aiAnalyzing ? "Analysing…" : "Run AI Analysis"}
+                      </button>
+                    </div>
+                  )}
+                  {aiAnalyzing && (
+                    <div className="flex items-center gap-3 py-3 text-muted-foreground text-sm">
+                      <Loader2 className="w-5 h-5 animate-spin text-primary flex-shrink-0"/>
+                      <div>
+                        <p className="font-medium">Analysing your taste…</p>
+                        <p className="text-xs opacity-70 mt-0.5">Classifying via MusicBrainz. Up to 60s on first run.</p>
+                      </div>
+                    </div>
+                  )}
+                  {aiAnalysis && !aiAnalyzing && (
+                    <div className="flex flex-col gap-3">
+                      <p className="text-sm text-muted-foreground leading-relaxed">{aiAnalysis.taste_summary}</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {(aiAnalysis.liked_types || []).map((type, i) => (
+                          <span key={i} className="text-xs px-2.5 py-1 rounded-full bg-primary/15 text-primary border border-primary/25 font-medium">♥ {type}</span>
+                        ))}
+                        {(aiAnalysis.disliked_types || []).map((type, i) => (
+                          <span key={i} className="text-xs px-2.5 py-1 rounded-full bg-destructive/10 text-destructive/70 border border-destructive/20">✕ {type}</span>
+                        ))}
+                      </div>
+                      {(aiAnalysis.similar_users || []).length > 0 && (
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Zap className="w-3.5 h-3.5 text-blue-400"/>
+                          <span><span className="text-blue-400 font-semibold">{aiAnalysis.similar_users.length}</span> listeners share your taste</span>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2 pt-1">
+                        <span className="text-xs text-muted-foreground/60 flex-1">
+                          {aiAnalysis.generated_at ? `Analysed ${Math.round((Date.now()-aiAnalysis.generated_at)/3_600_000)}h ago` : ""}
+                        </span>
+                        <button onClick={handleRunAnalysis} disabled={aiAnalyzing}
+                          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground border border-border/40 px-2.5 py-1 rounded-full">
+                          <Sparkles className="w-3 h-3"/>Re-analyse
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 mb-3">
+                  <Sparkles className="w-4 h-4 text-primary"/>
+                  <h3 className="text-sm font-bold">Recommended for you</h3>
+                  {aiRecos.length > 0 && <span className="text-[10px] text-primary/80 bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-full ml-1">AI · personalised</span>}
+                  <button onClick={loadAIRecommendations} className="ml-auto text-xs text-muted-foreground hover:text-foreground">Refresh</button>
+                </div>
+                {aiRecosLoading ? <CardGrid n={6}/>
+                  : aiRecos.length > 0 ? (
+                    <div className={GRID}>
+                      {aiRecos.slice(0,12).map((song,i) => <SongCard key={i} song={song} onPlayComplete={loadRecentlyPlayed}/>)}
+                    </div>
+                  ) : aiAnalysis ? (
+                    <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-card/30 border border-border/20 text-sm text-muted-foreground">
+                      <Zap className="w-4 h-4 text-primary/40 flex-shrink-0"/>
+                      <span>No recommendations yet — re-run analysis or keep listening</span>
+                    </div>
+                  ) : null}
+              </section>
+            )}
+
             {/* Recently played */}
             {recentlyPlayed.length > 0 && (
               <section className="mb-8">
