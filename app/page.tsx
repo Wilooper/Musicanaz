@@ -13,6 +13,9 @@ import { Button } from "@/components/ui/button"
 import SongCard from "@/components/song-card"
 import ImageWithFallback from "@/components/image-with-fallback"
 import { getRecentlyPlayed, getCountry, getPreferences, savePreferences } from "@/lib/storage"
+import { getAISearchEnabled, setAISearchEnabled, aiPersonalizedSearch, getAIRecommendations, aiSongToSong, runAIAnalysis } from "@/lib/ai-client"
+import { getLocalData, getStats as getLocalStats, type TasteAnalysis } from "@/lib/local-data"
+import { getOrCreateUID } from "@/lib/uid"
 import { getAISearchEnabled, setAISearchEnabled, aiPersonalizedSearch, getAIRecommendations, getCollabSignals, aiSongToSong } from "@/lib/ai-client"
 import type { Song, MusivaTrack } from "@/lib/types"
 import { useRouter } from "next/navigation"
@@ -475,6 +478,17 @@ export default function HomePage() {
   const [aiSearchLoading,  setAiSearchLoading]  = useState(false)
   const [aiSearchBadge,    setAiSearchBadge]    = useState(false) // "personalized" label
 
+  // ── AI state ────────────────────────────────────────────────────────────
+  const [aiEnabled,       setAiEnabled]       = useState(false)
+  const [aiAnalysis,      setAiAnalysis]      = useState<TasteAnalysis | null>(null)
+  const [aiAnalyzing,     setAiAnalyzing]     = useState(false)
+  const [aiAnalysisError, setAiAnalysisError] = useState("")
+  const [aiRecos,         setAiRecos]         = useState<Song[]>([])
+  const [aiRecosLoading,  setAiRecosLoading]  = useState(false)
+  const [aiSearchLoading, setAiSearchLoading] = useState(false)
+  const [aiSearchBadge,   setAiSearchBadge]   = useState(false)
+  const [localStats,      setLocalStats]      = useState<ReturnType<typeof getLocalStats> | null>(null)
+
   // Search state
   const [searchQuery,     setSearchQuery]     = useState("")
   const [suggestions,     setSuggestions]     = useState<string[]>([])
@@ -521,6 +535,14 @@ export default function HomePage() {
     setAiEnabled(getAISearchEnabled())
   }, [])
 
+  // Init AI from localStorage
+  useEffect(() => {
+    setAiEnabled(getAISearchEnabled())
+    const d = getLocalData()
+    if (d?.analysis) setAiAnalysis(d.analysis)
+    setLocalStats(getLocalStats())
+  }, [])
+
   // Load country + source prefs on mount
   useEffect(() => {
     const prefs = getPreferences()
@@ -565,6 +587,34 @@ export default function HomePage() {
 
   // Loaders
   const loadRecentlyPlayed = useCallback(() => setRecentlyPlayed(getRecentlyPlayed()), [])
+
+  const handleRunAnalysis = useCallback(async () => {
+    setAiAnalyzing(true); setAiAnalysisError("")
+    try {
+      const result = await runAIAnalysis()
+      if (result) {
+        setAiAnalysis(result.analysis)
+        const songs = (result.suggestions || []).map(aiSongToSong).filter((s: Song) => s.videoId)
+        setAiRecos(songs)
+        setLocalStats(getLocalStats())
+      } else {
+        setAiAnalysisError("Play at least 3 songs to unlock AI analysis.")
+      }
+    } catch (e: any) {
+      setAiAnalysisError(e.message || "Analysis failed")
+    }
+    setAiAnalyzing(false)
+  }, [])
+
+  const loadAIRecommendations = useCallback(async () => {
+    setAiRecosLoading(true)
+    try {
+      const data = await getAIRecommendations(20)
+      const songs = (data.songs || []).map(aiSongToSong).filter((s: Song) => s.videoId)
+      setAiRecos(songs)
+    } catch { setAiRecos([]) }
+    setAiRecosLoading(false)
+  }, [])
 
   const loadAIRecommendations = useCallback(async () => {
     setAiRecosLoading(true)
@@ -659,6 +709,7 @@ export default function HomePage() {
   }, [chartsSource])
 
   useEffect(() => { loadHome(); loadRecentlyPlayed(); loadTopPlaylists() }, []) // eslint-disable-line
+  useEffect(() => { if (activeView === "home" && aiEnabled) loadAIRecommendations() }, [activeView, aiEnabled]) // eslint-disable-line
   useEffect(() => { if (activeView === "home" && aiEnabled) { loadAIRecommendations(); loadAICollabSignals() } }, [activeView, aiEnabled]) // eslint-disable-line
   useEffect(() => { if (activeView === "trending") loadTrending() }, [activeView, trendingCountry, trendingSource]) // eslint-disable-line
   useEffect(() => { if (activeView === "charts") loadCharts(selectedRegion) }, [activeView, selectedRegion, chartsSource]) // eslint-disable-line
@@ -1262,6 +1313,22 @@ export default function HomePage() {
                     : <Sparkles className="w-3 h-3" />}
                   <span className="hidden sm:inline">AI</span>
                 </button>
+                <button
+                  type="button"
+                  title={aiEnabled ? "AI Search ON" : "AI Search OFF"}
+                  onClick={() => { const n = !aiEnabled; setAiEnabled(n); setAISearchEnabled(n) }}
+                  className={[
+                    "flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border transition-all mr-0.5",
+                    aiEnabled
+                      ? "bg-primary text-primary-foreground border-primary shadow-sm shadow-primary/30"
+                      : "bg-card/60 text-muted-foreground border-border/40 hover:border-primary/40",
+                  ].join(" ")}
+                >
+                  {aiSearchLoading
+                    ? <Loader2 className="w-3 h-3 animate-spin" />
+                    : <Sparkles className="w-3 h-3" />}
+                  <span className="hidden sm:inline">AI</span>
+                </button>
                 {searchQuery && (
                   <button type="button" onClick={clearSearch} className="w-6 h-6 rounded-full flex items-center justify-center hover:bg-muted transition-colors">
                     <X className="w-3.5 h-3.5" />
@@ -1408,6 +1475,13 @@ export default function HomePage() {
                 <span>AI Search active · build history to personalise</span>
               </div>
             )}
+            {aiEnabled && aiSearchBadge && activeFilter === "songs" && (
+              <div className="flex items-center gap-1.5 mb-3 text-xs text-primary">
+                <Sparkles className="w-3 h-3" />
+                <span className="font-medium">Personalised for you</span>
+                <span className="text-muted-foreground ml-1">· ranked by your taste</span>
+              </div>
+            )}
             {renderResults()}
           </section>
         )}
@@ -1461,6 +1535,90 @@ export default function HomePage() {
                     </div>
                   </div>
                 )}
+              </section>
+            )}
+
+            {/* ── AI Analysis + Recommendations ── */}
+            {aiEnabled && (
+              <section className="mb-8">
+                <div className="rounded-2xl bg-card/40 border border-border/30 p-4 mb-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Brain className="w-4 h-4 text-primary" />
+                    <h2 className="text-base font-bold">AI Analysis</h2>
+                    {localStats && (
+                      <span className="ml-auto text-xs text-muted-foreground font-mono">
+                        {localStats.total_plays} plays · {localStats.liked} liked · {localStats.skipped} skipped
+                      </span>
+                    )}
+                  </div>
+                  {!aiAnalysis && !aiAnalyzing && (
+                    <div className="flex flex-col items-center gap-3 py-4 text-center">
+                      <Zap className="w-8 h-8 text-primary/30" />
+                      <p className="text-sm font-medium">No analysis yet</p>
+                      <p className="text-xs text-muted-foreground max-w-xs">Play a few songs then run the AI. It classifies your taste via MusicBrainz and finds users who share your vibe.</p>
+                      {aiAnalysisError && <p className="text-xs text-destructive">{aiAnalysisError}</p>}
+                      <button onClick={handleRunAnalysis} disabled={aiAnalyzing}
+                        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-50">
+                        {aiAnalyzing ? <Loader2 className="w-4 h-4 animate-spin"/> : <Sparkles className="w-4 h-4"/>}
+                        {aiAnalyzing ? "Analysing…" : "Run AI Analysis"}
+                      </button>
+                    </div>
+                  )}
+                  {aiAnalyzing && (
+                    <div className="flex items-center gap-3 py-3 text-muted-foreground text-sm">
+                      <Loader2 className="w-5 h-5 animate-spin text-primary flex-shrink-0"/>
+                      <div>
+                        <p className="font-medium">Analysing your taste…</p>
+                        <p className="text-xs opacity-70 mt-0.5">Classifying songs via MusicBrainz. Up to 60 s on first run.</p>
+                      </div>
+                    </div>
+                  )}
+                  {aiAnalysis && !aiAnalyzing && (
+                    <div className="flex flex-col gap-3">
+                      <p className="text-sm text-muted-foreground leading-relaxed">{aiAnalysis.taste_summary}</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {(aiAnalysis.liked_types || []).map((t, i) => (
+                          <span key={i} className="text-xs px-2.5 py-1 rounded-full bg-primary/15 text-primary border border-primary/25 font-medium">♥ {t}</span>
+                        ))}
+                        {(aiAnalysis.disliked_types || []).map((t, i) => (
+                          <span key={i} className="text-xs px-2.5 py-1 rounded-full bg-destructive/10 text-destructive/70 border border-destructive/20">✕ {t}</span>
+                        ))}
+                      </div>
+                      {(aiAnalysis.similar_users || []).length > 0 && (
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Zap className="w-3.5 h-3.5 text-blue-400"/>
+                          <span><span className="text-blue-400 font-semibold">{aiAnalysis.similar_users.length}</span> listeners share your taste</span>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2 pt-1">
+                        <span className="text-xs text-muted-foreground/60 flex-1">
+                          {aiAnalysis.generated_at ? `Analysed ${Math.round((Date.now()-aiAnalysis.generated_at)/3_600_000)}h ago` : ""}
+                        </span>
+                        <button onClick={handleRunAnalysis} disabled={aiAnalyzing}
+                          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground border border-border/40 px-2.5 py-1 rounded-full transition-colors">
+                          <Sparkles className="w-3 h-3"/>Re-analyse
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 mb-3">
+                  <Sparkles className="w-4 h-4 text-primary"/>
+                  <h3 className="text-sm font-bold">Recommended for you</h3>
+                  {aiRecos.length > 0 && <span className="text-[10px] text-primary/80 bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-full ml-1">AI · personalised</span>}
+                  <button onClick={loadAIRecommendations} className="ml-auto text-xs text-muted-foreground hover:text-foreground transition-colors">Refresh</button>
+                </div>
+                {aiRecosLoading ? <CardGrid n={6}/>
+                  : aiRecos.length > 0 ? (
+                    <div className={GRID}>
+                      {aiRecos.slice(0,12).map((song,i) => <SongCard key={i} song={song} onPlayComplete={loadRecentlyPlayed}/>)}
+                    </div>
+                  ) : aiAnalysis ? (
+                    <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-card/30 border border-border/20 text-sm text-muted-foreground">
+                      <Zap className="w-4 h-4 text-primary/40 flex-shrink-0"/>
+                      <span>No recommendations yet — re-run analysis or keep listening</span>
+                    </div>
+                  ) : null}
               </section>
             )}
 

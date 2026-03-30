@@ -15,6 +15,8 @@ import ImageWithFallback from "@/components/image-with-fallback"
 import { Input } from "@/components/ui/input"
 import { Slider } from "@/components/ui/slider"
 import { useAudio } from "@/lib/audio-context"
+import { getOrCreateUID } from "@/lib/uid"
+import { getLocalData, clearLocalData, getStats as getLocalStats } from "@/lib/local-data"
 import {
   getPreferences, savePreferences, type UserPreferences,
   getTodayListenSeconds, getMonthListenSeconds, getAllTimeListenSeconds,
@@ -73,6 +75,11 @@ export default function SettingsPage() {
     trendingSource: "all", chartsSource: "all",
     blurThumbnailBg: false, lyricsAutoScroll: true,
   })
+  const [uid,            setUid]             = useState("")
+  const [localDataStats, setLocalDataStats]  = useState<ReturnType<typeof getLocalStats>|null>(null)
+  const [showRawData,    setShowRawData]     = useState(false)
+  const [rawDataStr,     setRawDataStr]      = useState("")
+
   const [saved,           setSaved]           = useState(false)
   const [showCountryList, setShowCountryList] = useState(false)
   const [showApiKey,      setShowApiKey]      = useState(false)
@@ -113,6 +120,8 @@ export default function SettingsPage() {
     const p = getPreferences()
     setPrefs(p)
     setApiKeyInput(p.groqApiKey || "")
+    setUid(getOrCreateUID() || "")
+    setLocalDataStats(getLocalStats())
     setPartyName(getPartyUsername())
     setListenStats({
       today:   getTodayListenSeconds(),
@@ -522,6 +531,75 @@ export default function SettingsPage() {
               <p className="text-xs text-muted-foreground/60 mt-1">Transliteration & translation will unlock</p>
             </div>
           )}
+        </section>
+
+        {/* ── AI & Account ─── */}
+        <section>
+          <SectionHeader
+            icon={<Zap className="w-5 h-5 text-primary" />}
+            title="AI & Account"
+            desc="Your anonymous User ID and on-device AI listening data."
+          />
+          <div className="rounded-2xl bg-card/40 border border-border/30 divide-y divide-border/20">
+            <div className="px-4 py-3 flex items-center gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold">Your User ID</p>
+                <p className="text-xs text-muted-foreground font-mono mt-0.5 truncate">{uid || "Generating…"}</p>
+                <p className="text-[11px] text-muted-foreground/60 mt-0.5">Anonymous · stored only on this device · used for similar-user matching</p>
+              </div>
+            </div>
+            {localDataStats && (
+              <div className="px-4 py-3">
+                <p className="text-sm font-semibold mb-2">Local AI Data</p>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  {([
+                    ["Songs",      localDataStats.total_songs],
+                    ["Plays",      localDataStats.total_plays],
+                    ["Liked",      localDataStats.liked],
+                    ["Skipped",    localDataStats.skipped],
+                    ["Downloads",  localDataStats.downloaded],
+                    ["Analysis",   localDataStats.has_analysis
+                      ? (localDataStats.analysis_age_h === 0 ? "Fresh"
+                          : `${localDataStats.analysis_age_h}h ago`)
+                      : "None"],
+                  ] as [string, string|number][]).map(([label, val]) => (
+                    <div key={label} className="bg-card/50 rounded-xl py-2 px-1">
+                      <p className="text-base font-bold text-primary">{val}</p>
+                      <p className="text-[10px] text-muted-foreground">{label}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="px-4 py-3 flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => {
+                  const d = getLocalData()
+                  setRawDataStr(d ? JSON.stringify(d, null, 2) : "No data yet.")
+                  setShowRawData(v => !v)
+                }}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl border border-border/40 bg-card/40 hover:bg-card/70 transition-colors"
+              >
+                <Eye className="w-3.5 h-3.5"/>{showRawData ? "Hide" : "View"} JSON
+              </button>
+              <button
+                onClick={() => {
+                  if (!confirm("Clear all local AI data? This cannot be undone.")) return
+                  clearLocalData(); setLocalDataStats(null); setRawDataStr("")
+                }}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl border border-red-500/30 text-red-500/80 hover:bg-red-500/10 transition-colors"
+              >
+                <Trash2 className="w-3.5 h-3.5"/>Clear AI data
+              </button>
+            </div>
+            {showRawData && rawDataStr && (
+              <div className="px-4 py-3">
+                <pre className="text-[10px] font-mono text-muted-foreground bg-muted/20 rounded-xl p-3 overflow-x-auto max-h-64 whitespace-pre-wrap break-all">
+                  {rawDataStr}
+                </pre>
+              </div>
+            )}
+          </div>
         </section>
 
         {/* ── Party Username ─── */}

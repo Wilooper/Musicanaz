@@ -7,6 +7,7 @@ import {
 } from "react"
 import type { LyricLine, LyricsResponse, Song, UpNextQueue } from "./types"
 import { recordListenSeconds, addToSongHistory, recordBadgeEvent, getPartyUsername } from "./storage"
+import { localRecordPlay } from "./ai-client"
 import { logAIEvent } from "./ai-client"
 
 const LYRICS_API = process.env.NEXT_PUBLIC_LYRICS_API_URL || "https://test-0k.onrender.com"
@@ -664,8 +665,20 @@ export function AudioProvider({ children }: { children: ReactNode }) {
     }
   }, [loadVideo, fetchUpNext])
 
+  // ── AI: refs for 25-second skip detection ─────────────────────────────
+  const songStartRef = useRef<number>(0)
+  const prevSongRef  = useRef<Song | null>(null)
+
   // ── public API ───────────────────────────────────────────
   const playSong = useCallback((song: Song, isManual = true, startTime = 0, stopAt = 0) => {
+    // ── AI: record previous song + detect < 25 s skip ───────────────────────
+    const _prev = prevSongRef.current
+    if (_prev && _prev.videoId && !_prev.isPodcast) {
+      const _ms = Date.now() - songStartRef.current
+      localRecordPlay(_prev, _ms, _ms < 25_000, 0)
+    }
+    prevSongRef.current  = song
+    songStartRef.current = Date.now()
     // Store stopAt in the pending ref — it will be applied the moment PLAYING fires
     if (stopAt > 0 && stopAt > startTime) {
       pendingStopAtRef.current = stopAt
