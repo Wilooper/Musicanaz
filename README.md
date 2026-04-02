@@ -33,7 +33,10 @@ Stream music, discover new tracks, manage playlists, and listen together with fr
 - **Package manager:** pnpm
 
 ---
-
+## Before you start
+- Access the hosted version on https://musicanaz.vercel.app/
+- You can use any browser to access `Musicanaz` 
+  
 ## Getting Started
 
 ### Prerequisites
