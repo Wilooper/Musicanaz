@@ -234,8 +234,3 @@ export function getXPLevel(xp: number): { level: number; title: string; nextAt: 
   return t.find(x => xp < x.nextAt) ?? t[t.length-1]
 }
 
-// Export getListenStats for internal use in badge evaluation
-// (re-exported from storage.ts which imports from SharedStore directly)
-function getListenStats() {
-  return SharedStore.get<Record<string, number>>("listen_stats", {})
-}
