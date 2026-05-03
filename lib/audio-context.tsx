@@ -7,6 +7,7 @@ import {
 } from "react"
 import type { LyricLine, LyricsResponse, Song, UpNextQueue } from "./types"
 import { recordListenSeconds, addToSongHistory, recordBadgeEvent, getPartyUsername } from "./storage"
+import { recordYTPlay } from "./yt-client"
 import { localRecordPlay } from "./ai-client"
 
 const LYRICS_API = process.env.NEXT_PUBLIC_LYRICS_API_URL || "https://test-0k.onrender.com"
@@ -639,6 +640,7 @@ export function AudioProvider({ children }: { children: ReactNode }) {
 
       addToSongHistory(song)
       // Badge events: session start + genre tracking
+      recordYTPlay(song.videoId || song.id)
       const nowH = new Date().getHours()
       recordBadgeEvent("session_start")
       if ((song as any).genre) recordBadgeEvent("genre_play", (song as any).genre)

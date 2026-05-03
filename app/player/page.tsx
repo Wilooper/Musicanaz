@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button"
 import ImageWithFallback from "@/components/image-with-fallback"
 import { Slider } from "@/components/ui/slider"
 import { useAudio } from "@/lib/audio-context"
+import { recordYTPlay } from "@/lib/yt-client"
 import {
   isLiked, toggleLike, getPlaylists,
   addSongToPlaylist, createPlaylist, addToRecentlyPlayed,
@@ -403,7 +404,29 @@ function PlayerContent() {
       .catch(() => { setPodcastEpisodes([]); setPodcastEpiLoading(false) })
   }, [isPodcast, podcastId, currentSong?.podcastId, videoId, songId]) // eslint-disable-line
 
-  useEffect(() => { if (songId) setLiked(isLiked(songId)) }, [songId])
+  
+  // [patch] Auto-fetch title/thumbnail when playing from a raw link
+  useEffect(() => {
+    if (!songId) return
+    if (title && thumbnail) return
+    if (currentSong?.title && currentSong.title !== songId) return
+    const prefs = (() => { try { return JSON.parse(localStorage.getItem("mz_shared:preferences") || "{}") } catch { return {} } })()
+    const country = prefs.country || "ZZ"
+    fetch(`/api/musiva/video-info?id=${encodeURIComponent(songId)}&country=${encodeURIComponent(country)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data?.title) return
+        if (currentSong) playSong({ ...currentSong, title: data.title, artist: data.artist || "", thumbnail: data.thumbnail || "" }, false)
+        const sp = new URLSearchParams(window.location.search)
+        if (!sp.get("title"))     sp.set("title",     data.title)
+        if (!sp.get("artist"))    sp.set("artist",    data.artist || "")
+        if (!sp.get("thumbnail")) sp.set("thumbnail", data.thumbnail || "")
+        window.history.replaceState(null, "", "?" + sp.toString())
+      })
+      .catch(() => {})
+  }, [songId]) // eslint-disable-line
+
+useEffect(() => { if (songId) setLiked(isLiked(songId)) }, [songId])
   useEffect(() => {
     setLyricsFullscreen(false)
     setAiLines(null)
