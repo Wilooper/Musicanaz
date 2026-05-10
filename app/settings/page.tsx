@@ -391,15 +391,6 @@ export default function SettingsPage() {
           <YTCookiesPanel />
         </section>
 
-        {/* ── YouTube Account ─── */}
-        <section>
-          <SectionHeader
-            icon={<Music className="w-5 h-5 text-primary" />}
-            title="YouTube Account"
-            desc="Paste your YouTube cookies to get a personalised feed, history and liked songs."
-          />
-          <YTCookiesPanel />
-        </section>
 
         {/* ── AI Features (Groq) ─── */}
         <section>

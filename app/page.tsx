@@ -12,7 +12,8 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import SongCard from "@/components/song-card"
 import ImageWithFallback from "@/components/image-with-fallback"
-import { getRecentlyPlayed, getCountry, getPreferences, savePreferences } from "@/lib/storage"
+import { getRecentlyPlayed, getCountry, getPreferences, savePreferences, hasCookies } from "@/lib/storage"
+import { getYTHome, ytItemToSong } from "@/lib/yt-client"
 import { getAISearchEnabled, setAISearchEnabled, aiPersonalizedSearch, getAIRecommendations, aiSongToSong, runAIAnalysis } from "@/lib/ai-client"
 import { getLocalData, getStats as getLocalStats, type TasteAnalysis } from "@/lib/local-data"
 import { getOrCreateUID } from "@/lib/uid"
@@ -512,6 +513,7 @@ export default function HomePage() {
   const [selectedRegion,  setSelectedRegion]  = useState("ZZ")
   const [chartsTab,       setChartsTab]       = useState<"songs" | "videos" | "trending">("songs")
   const [chartsSource,    setChartsSource]    = useState("all")
+  const [ytAuthenticated, setYtAuthenticated] = useState(false)
   const [recentlyPlayed,  setRecentlyPlayed]  = useState<Song[]>([])
   const [activeView,      setActiveView]      = useState<View>("home")
 
@@ -605,7 +607,24 @@ export default function HomePage() {
 
   const loadHome = useCallback(async () => {
     setHomeLoading(true)
+    const isYTAuth = typeof window !== "undefined" && hasCookies()
+    setYtAuthenticated(isYTAuth)
     try {
+      if (isYTAuth) {
+        // Use personalised YT home feed
+        const items = await getYTHome()
+        if (items.length > 0) {
+          // Convert to shelf format the home UI expects
+          const shelf = {
+            title: "For You",
+            contents: items.slice(0, 20).map(ytItemToSong),
+          }
+          setHomeShelves([shelf])
+          setHomeLoading(false)
+          return
+        }
+      }
+      // Fallback to musivapi
       const data = await fetch("/api/musiva/home?limit=6").then(r => r.json())
       setHomeShelves(Array.isArray(data) ? data : data.shelves || [])
     } catch { setHomeShelves([]) }

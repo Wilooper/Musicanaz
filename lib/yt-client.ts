@@ -1,180 +1,65 @@
-/**
- * Musicanaz YT Client  (lib/yt-client.ts)
- * ─────────────────────────────────────────────────────────────────────────────
- * Sends encrypted cookies to ytdata-go for personalised YouTube data.
- * Encryption/decryption happens entirely client-side via Web Crypto API.
- * The server is stateless — it decrypts, uses, and discards cookies per request.
- * ─────────────────────────────────────────────────────────────────────────────
- */
+"use client"
+// yt-client.ts — calls /api/ytdata proxy (server-side, keeps YTDATA_URL secret)
 
-import { getEncryptedCookies, getEncryptionKey, hasCookies, setEncryptedCookies, setEncryptionKey, clearEncryptedCookies } from "./storage"
-import { getOrCreateUID } from "./uid"
+import { getEncryptedCookies, getEncryptionKey, hasCookies } from "./storage"
+import type { Song } from "./types"
 
-const YTDATA_URL = process.env.NEXT_PUBLIC_YTDATA_URL ?? ""
+const BASE = "/api/ytdata"
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-export interface YTSongItem {
-  videoId:   string
-  title:     string
-  artist:    string
-  album:     string
-  thumbnail: string
-  duration:  string
+async function _encPayload(): Promise<{ enc_cookies: string; key: string } | {}> {
+  if (!hasCookies()) return {}
+  const enc = getEncryptedCookies()
+  const key = getEncryptionKey()
+  if (!enc || !key) return {}
+  return { enc_cookies: enc, key }
 }
 
-export interface YTSection {
-  title: string
-  items: YTSongItem[]
-}
-
-export interface YTHomeFeed {
-  sections: YTSection[]
-}
-
-// ── AES-GCM encryption helpers (Web Crypto) ───────────────────────────────────
-
-/** Derive a 256-bit AES key from a passphrase using SHA-256. */
-async function deriveKey(passphrase: string): Promise<CryptoKey> {
-  const enc = new TextEncoder()
-  const raw = await crypto.subtle.digest("SHA-256", enc.encode(passphrase))
-  return crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["encrypt", "decrypt"])
-}
-
-/** Encrypt UTF-8 plaintext → base64url(nonce || ciphertext || tag). */
-export async function encryptText(plaintext: string, passphrase: string): Promise<string> {
-  const key   = await deriveKey(passphrase)
-  const nonce = crypto.getRandomValues(new Uint8Array(12))
-  const enc   = new TextEncoder()
-  const ct    = await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, key, enc.encode(plaintext))
-  const out   = new Uint8Array(nonce.byteLength + ct.byteLength)
-  out.set(nonce, 0)
-  out.set(new Uint8Array(ct), nonce.byteLength)
-  return btoa(String.fromCharCode(...out)).replace(/\+/g, "-").replace(/\//g, "_")
-}
-
-/** Decrypt base64url payload back to plaintext. */
-export async function decryptText(encoded: string, passphrase: string): Promise<string> {
-  const b64    = encoded.replace(/-/g, "+").replace(/_/g, "/")
-  const buf    = Uint8Array.from(atob(b64), c => c.charCodeAt(0))
-  const key    = await deriveKey(passphrase)
-  const nonce  = buf.slice(0, 12)
-  const ct     = buf.slice(12)
-  const plain  = await crypto.subtle.decrypt({ name: "AES-GCM", iv: nonce }, key, ct)
-  return new TextDecoder().decode(plain)
-}
-
-// ── Cookie setup ──────────────────────────────────────────────────────────────
-
-/**
- * saveCookies encrypts and stores Netscape cookies.
- * The encryption key is derived from the user's UID (stored in localStorage).
- * Returns the encrypted payload for confirmation.
- */
-export async function saveCookies(netscapeCookies: string): Promise<string> {
-  const uid = getOrCreateUID()
-  // Key = uid + "_ytkey" to make it distinct but still device-local
-  const passphrase = uid + "_ytkey"
-  const encrypted  = await encryptText(netscapeCookies, passphrase)
-  setEncryptedCookies(encrypted)
-  setEncryptionKey(passphrase)
-  return encrypted
-}
-
-export function removeCookies(): void {
-  clearEncryptedCookies()
-}
-
-export function cookiesAreSet(): boolean {
-  return hasCookies()
-}
-
-// ── Request builder ───────────────────────────────────────────────────────────
-
-function buildPayload(extra: Record<string, string> = {}) {
-  return {
-    encrypted_cookies: getEncryptedCookies(),
-    encryption_key:    getEncryptionKey(),
-    uid:               getOrCreateUID(),
-    ...extra,
-  }
-}
-
-async function postYTData<T>(path: string, extra: Record<string, string> = {}): Promise<T> {
-  if (!YTDATA_URL) throw new Error("NEXT_PUBLIC_YTDATA_URL not set")
-  if (!hasCookies()) throw new Error("No YouTube cookies configured")
-
-  const res = await fetch(YTDATA_URL + path, {
-    method:  "POST",
+async function post<T = any>(path: string): Promise<T> {
+  const body = await _encPayload()
+  const r = await fetch(`${BASE}${path}`, {
+    method: "POST",
     headers: { "Content-Type": "application/json" },
-    body:    JSON.stringify(buildPayload(extra)),
-    signal:  AbortSignal.timeout(20_000),
+    body: JSON.stringify(body),
   })
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }))
-    throw new Error(err.error ?? `ytdata ${res.status}`)
-  }
-
-  return res.json() as Promise<T>
+  if (!r.ok) throw new Error(`ytdata ${path} → ${r.status}`)
+  return r.json()
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
-
-/** Personalised YTM home feed. */
-export function getYTHome(): Promise<YTHomeFeed> {
-  return postYTData<YTHomeFeed>("/home")
+export async function getYTHome():     Promise<any[]> { try { const d = await post("/home");     return d.items ?? [] } catch { return [] } }
+export async function getYTHistory():  Promise<any[]> { try { const d = await post("/history");  return d.items ?? [] } catch { return [] } }
+export async function getYTLiked():    Promise<any[]> { try { const d = await post("/liked");    return d.items ?? [] } catch { return [] } }
+export async function getYTTrending(): Promise<any[]> { try { const d = await post("/trending"); return d.items ?? [] } catch { return [] } }
+export async function getYTRelated(videoId: string): Promise<any[]> {
+  try { const d = await post(`/related?v=${videoId}`); return d.items ?? [] } catch { return [] }
+}
+export async function recordYTPlay(videoId: string): Promise<void> {
+  try { await post(`/record_play?v=${videoId}`) } catch {}
 }
 
-/** YTM Explore / new releases. */
-export function getYTExplore(): Promise<YTHomeFeed> {
-  return postYTData<YTHomeFeed>("/explore")
-}
-
-/** YTM Trending. */
-export function getYTTrending(): Promise<YTHomeFeed> {
-  return postYTData<YTHomeFeed>("/trending")
-}
-
-/** YouTube listening history. */
-export function getYTHistory(): Promise<{ items: YTSongItem[] }> {
-  return postYTData<{ items: YTSongItem[] }>("/history")
-}
-
-/** Liked songs on YouTube. */
-export function getYTLiked(): Promise<{ items: YTSongItem[] }> {
-  return postYTData<{ items: YTSongItem[] }>("/liked")
-}
-
-/** Related songs for a videoId. */
-export function getYTRelated(videoId: string): Promise<{ raw: unknown }> {
-  return postYTData("/related", { video_id: videoId })
-}
-
-/**
- * Record a play event back to YouTube.
- * Fire-and-forget — call this when a song starts playing.
- */
-export function recordYTPlay(videoId: string): void {
-  if (!hasCookies() || !YTDATA_URL) return
-  fetch(YTDATA_URL + "/record_play", {
-    method:  "POST",
-    headers: { "Content-Type": "application/json" },
-    body:    JSON.stringify({ ...buildPayload(), video_id: videoId }),
-    keepalive: true,
-  }).catch(() => {}) // fire and forget
-}
-
-/** Convert YTSongItem to the app's Song type. */
-export function ytItemToSong(item: YTSongItem) {
+export function ytItemToSong(item: any): Song {
   return {
-    id:        item.videoId,
-    videoId:   item.videoId,
-    title:     item.title,
-    artist:    item.artist,
-    thumbnail: item.thumbnail,
-    album:     item.album,
-    duration:  item.duration,
-    type:      "musiva" as const,
+    id:        item.videoId ?? item.id ?? "",
+    title:     item.title   ?? "Unknown",
+    artist:    item.artist  ?? item.artists?.[0]?.name ?? "YouTube",
+    thumbnail: item.thumbnail ?? item.thumbnails?.[0]?.url ?? "",
+    videoId:   item.videoId  ?? item.id ?? "",
+    type:      "yt",
+    duration:  item.duration ?? "",
+    album:     item.album    ?? "",
+  }
+}
+
+// Web Crypto AES-GCM helpers (for encrypting cookies client-side before storing)
+export async function encryptCookies(raw: string, uid: string): Promise<{ enc: string; key: string }> {
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw", new TextEncoder().encode((uid + "_ytkey").padEnd(32, "0").slice(0, 32)),
+    { name: "AES-GCM" }, false, ["encrypt"]
+  )
+  const iv   = crypto.getRandomValues(new Uint8Array(12))
+  const buf  = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, keyMaterial, new TextEncoder().encode(raw))
+  const b64  = (arr: Uint8Array) => btoa(String.fromCharCode(...arr))
+  return {
+    enc: b64(iv) + "." + b64(new Uint8Array(buf)),
+    key: uid + "_ytkey",
   }
 }

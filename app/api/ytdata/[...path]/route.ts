@@ -1,39 +1,51 @@
-/**
- * app/api/ytdata/[...path]/route.ts
- * Transparent proxy to the ytdata-go service.
- * Strips CORS issues on mobile browsers.
- */
-
 import { NextRequest, NextResponse } from "next/server"
 
-const YTDATA_URL = process.env.YTDATA_URL ?? process.env.NEXT_PUBLIC_YTDATA_URL ?? ""
+const YTDATA_URL = process.env.YTDATA_URL ?? ""
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { path: string[] } }
+  { params }: { params: Promise<{ path: string[] }> }
 ) {
+  const { path } = await params
+  const endpoint = "/" + path.join("/")
+
   if (!YTDATA_URL) {
     return NextResponse.json({ error: "YTDATA_URL not configured" }, { status: 503 })
   }
 
-  const path    = "/" + (params.path ?? []).join("/")
-  const allowed = ["/home", "/explore", "/trending", "/history", "/liked", "/related", "/record_play"]
-  if (!allowed.includes(path)) {
-    return NextResponse.json({ error: "unknown path" }, { status: 404 })
-  }
-
-  const body = await req.text()
-
   try {
-    const upstream = await fetch(YTDATA_URL + path, {
-      method:  "POST",
+    const body = await req.text()
+    const upstream = await fetch(`${YTDATA_URL}${endpoint}`, {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
       body,
-      signal: AbortSignal.timeout(18_000),
+      signal: AbortSignal.timeout(15_000),
     })
     const data = await upstream.json()
     return NextResponse.json(data, { status: upstream.status })
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "upstream error" }, { status: 502 })
+    return NextResponse.json({ error: e?.message ?? "Upstream error" }, { status: 502 })
+  }
+}
+
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> }
+) {
+  const { path } = await params
+  const endpoint = "/" + path.join("/")
+
+  if (!YTDATA_URL) {
+    return NextResponse.json({ error: "YTDATA_URL not configured" }, { status: 503 })
+  }
+
+  try {
+    const upstream = await fetch(`${YTDATA_URL}${endpoint}`, {
+      signal: AbortSignal.timeout(15_000),
+    })
+    const data = await upstream.json()
+    return NextResponse.json(data, { status: upstream.status })
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message ?? "Upstream error" }, { status: 502 })
   }
 }
