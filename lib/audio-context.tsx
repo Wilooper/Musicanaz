@@ -132,6 +132,7 @@ export function AudioProvider({ children }: { children: ReactNode }) {
   const audioRef       = useRef<HTMLAudioElement>(null)
   const ytPlayerRef    = useRef<any>(null)
   const ytContainerRef = useRef<HTMLDivElement | null>(null)
+  const silentAudioRef = useRef<HTMLAudioElement | null>(null)
   const intervalRef    = useRef<ReturnType<typeof setInterval> | null>(null)
   const volumeRef      = useRef(80)
   const isLoadingRef   = useRef(false)
@@ -214,6 +215,18 @@ export function AudioProvider({ children }: { children: ReactNode }) {
     document.body.appendChild(div)
     ytContainerRef.current = div
     return () => { div.remove(); ytContainerRef.current = null }
+  }, [])
+
+  // ── silent keepalive audio (Android background playback) ────
+  useEffect(() => {
+    const audio = new Audio("data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=")
+    audio.loop   = true
+    audio.volume = 0.001          // effectively silent but counts as "playing"
+    silentAudioRef.current = audio
+    return () => {
+      audio.pause()
+      silentAudioRef.current = null
+    }
   }, [])
 
   // ── lyric sync ──────────────────────────────────────────
@@ -337,7 +350,7 @@ export function AudioProvider({ children }: { children: ReactNode }) {
     // seekforward/seekbackward are omitted intentionally: they cause Android Chrome
     // to show video-style 10s seek buttons instead of music prev/next controls.
     const handlers: Array<[MediaSessionAction, MediaSessionActionHandler]> = [
-      ["play",          () => { const p = ytPlayerRef.current; if (p) try { p.playVideo() } catch {} }],
+      ["play",          () => { const p = ytPlayerRef.current; if (p) try { p.playVideo() } catch {}; if (silentAudioRef.current?.paused) silentAudioRef.current.play().catch(()=>{}) }],
       ["pause",         () => { const p = ytPlayerRef.current; if (p) try { p.pauseVideo() } catch {} }],
       ["nexttrack",     () => { playNext() }],
       ["previoustrack", () => { playPrev() }],
@@ -356,6 +369,30 @@ export function AudioProvider({ children }: { children: ReactNode }) {
       }
     }
   }, []) // eslint-disable-line
+
+  // ── resume playback when tab/app becomes visible again ──
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        const p = ytPlayerRef.current
+        if (p && typeof p.getPlayerState === "function") {
+          try {
+            const S = (window as any).YT?.PlayerState
+            if (S && p.getPlayerState() === S.PAUSED) {
+              // Only auto-resume if we think music should be playing
+              // (isPlaying state may have been set to true before OS paused us)
+            }
+          } catch {}
+        }
+        // Always try to resume silent keepalive
+        if (silentAudioRef.current?.paused && ytPlayerRef.current) {
+          silentAudioRef.current.play().catch(() => {})
+        }
+      }
+    }
+    document.addEventListener("visibilitychange", onVisible)
+    return () => document.removeEventListener("visibilitychange", onVisible)
+  }, [])
 
   // ── sync volume ─────────────────────────────────────────
   useEffect(() => {
@@ -478,6 +515,10 @@ export function AudioProvider({ children }: { children: ReactNode }) {
             if (!S) return
             if (e.data === S.PLAYING) {
               setIsPlaying(true)
+              // Keep Android audio session alive
+              if (silentAudioRef.current && silentAudioRef.current.paused) {
+                silentAudioRef.current.play().catch(() => {})
+              }
               const dur = e.target.getDuration()
               if (dur) setDuration(dur)
               // Apply any pending stop-at the moment playback actually starts.
@@ -489,6 +530,9 @@ export function AudioProvider({ children }: { children: ReactNode }) {
               }
             } else if (e.data === S.PAUSED) {
               setIsPlaying(false)
+              if (silentAudioRef.current && !silentAudioRef.current.paused) {
+                silentAudioRef.current.pause()
+              }
             } else if (e.data === S.BUFFERING) {
               setIsPlaying(true)
             } else if (e.data === S.ENDED) {

@@ -3,7 +3,7 @@
 import type React from "react"
 import { useState, useEffect, useCallback, useRef } from "react"
 import {
-  Search, Music, Clock, Library, TrendingUp,
+  Search, Music, Clock, Library, TrendingUp, Youtube,
   BarChart3, Home, X, Loader2, ChevronRight,
   Mic2, Disc3, ListMusic, Radio, Video, Music2,
   Settings, Globe, Play, ClipboardPaste, Sparkles, Zap, Brain,
@@ -1226,6 +1226,9 @@ export default function HomePage() {
             </Button>
             <Button variant="ghost" size="sm" onClick={() => router.push("/history")} className="rounded-full px-3 gap-1">
               <Clock className="w-4 h-4" /><span className="hidden sm:inline">History</span>
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => router.push("/yt-data")} className="rounded-full px-3 gap-1">
+              <Youtube className="w-4 h-4 text-red-500" /><span className="hidden sm:inline">YT</span>
             </Button>
             <Button variant="ghost" size="icon" onClick={() => router.push("/settings")} className="rounded-full w-9 h-9">
               <Settings className="w-4 h-4" />

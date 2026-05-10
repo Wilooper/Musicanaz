@@ -15,6 +15,8 @@ import ImageWithFallback from "@/components/image-with-fallback"
 import { Input } from "@/components/ui/input"
 import { Slider } from "@/components/ui/slider"
 import { useAudio } from "@/lib/audio-context"
+import { YTCookiesPanel } from "@/components/yt-cookies-panel"
+import { YTCookiesPanel } from "@/components/yt-cookies-panel"
 import { getOrCreateUID } from "@/lib/uid"
 import { getLocalData, clearLocalData, getStats as getLocalStats } from "@/lib/local-data"
 import {
@@ -378,6 +380,26 @@ export default function SettingsPage() {
               ))}
             </div>
           </div>
+        </section>
+
+        {/* ── YouTube Account ─── */}
+        <section>
+          <SectionHeader
+            icon={<Music className="w-5 h-5 text-primary" />}
+            title="YouTube Account"
+            desc="Connect your YouTube cookies to get a personalised home feed, history, liked songs and more."
+          />
+          <YTCookiesPanel />
+        </section>
+
+        {/* ── YouTube Account ─── */}
+        <section>
+          <SectionHeader
+            icon={<Music className="w-5 h-5 text-primary" />}
+            title="YouTube Account"
+            desc="Paste your YouTube cookies to get a personalised feed, history and liked songs."
+          />
+          <YTCookiesPanel />
         </section>
 
         {/* ── AI Features (Groq) ─── */}
