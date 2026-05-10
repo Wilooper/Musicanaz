@@ -16,7 +16,6 @@ import { Input } from "@/components/ui/input"
 import { Slider } from "@/components/ui/slider"
 import { useAudio } from "@/lib/audio-context"
 import { YTCookiesPanel } from "@/components/yt-cookies-panel"
-import { YTCookiesPanel } from "@/components/yt-cookies-panel"
 import { getOrCreateUID } from "@/lib/uid"
 import { getLocalData, clearLocalData, getStats as getLocalStats } from "@/lib/local-data"
 import {
