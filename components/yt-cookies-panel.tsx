@@ -1,151 +1,107 @@
 "use client"
-/**
- * components/yt-cookies-panel.tsx
- * Settings panel for YouTube cookie management.
- * Drop into settings/page.tsx like any other settings section.
- *
- * Usage:
- *   import { YTCookiesPanel } from "@/components/yt-cookies-panel"
- *   <YTCookiesPanel />
- */
 
 import { useState, useEffect } from "react"
 import { saveCookies, removeCookies, cookiesAreSet } from "@/lib/yt-client"
+import { Button } from "@/components/ui/button"
+import { CheckCircle2, Trash2, Cookie, ChevronDown, ChevronUp } from "lucide-react"
 
 export function YTCookiesPanel() {
-  const [hasCookies, setHasCookies] = useState(false)
-  const [input, setInput]           = useState("")
-  const [status, setStatus]         = useState<"idle"|"saving"|"saved"|"error">("idle")
-  const [error, setError]           = useState("")
-  const [showInput, setShowInput]   = useState(false)
+  const [connected, setConnected] = useState(false)
+  const [text,      setText]      = useState("")
+  const [saving,    setSaving]    = useState(false)
+  const [showHow,   setShowHow]   = useState(false)
+  const [msg,       setMsg]       = useState("")
 
-  useEffect(() => {
-    setHasCookies(cookiesAreSet())
-  }, [])
+  useEffect(() => { setConnected(cookiesAreSet()) }, [])
 
-  async function handleSave() {
-    const trimmed = input.trim()
-    if (!trimmed) { setError("Paste your Netscape cookies first."); return }
-    if (!trimmed.includes("youtube.com") && !trimmed.includes("HTTP Cookie File")) {
-      setError("Doesn't look like a YouTube Netscape cookie file. Make sure you're pasting the correct file.")
+  function handleSave() {
+    const t = text.trim()
+    if (!t) { setMsg("Paste your cookies first."); return }
+    if (!t.includes("SAPISID") && !t.includes("music.youtube.com") && !t.includes("youtube.com")) {
+      setMsg("Doesn't look like YouTube Music cookies. Make sure you export from music.youtube.com.")
       return
     }
-    setStatus("saving")
-    setError("")
+    setSaving(true)
     try {
-      await saveCookies(trimmed)
-      setHasCookies(true)
-      setStatus("saved")
-      setInput("")
-      setShowInput(false)
-      setTimeout(() => setStatus("idle"), 3000)
+      saveCookies(t)
+      setConnected(true)
+      setText("")
+      setMsg("Connected! Go to Home to see your personalised feed.")
     } catch (e: any) {
-      setStatus("error")
-      setError(e?.message ?? "Failed to save cookies")
+      setMsg("Error: " + (e?.message ?? "unknown"))
+    } finally {
+      setSaving(false)
     }
   }
 
   function handleRemove() {
     removeCookies()
-    setHasCookies(false)
-    setInput("")
-    setShowInput(false)
-    setStatus("idle")
+    setConnected(false)
+    setText("")
+    setMsg("Disconnected.")
   }
 
   return (
-    <div className="rounded-xl border border-white/10 bg-white/5 p-5 space-y-4">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h3 className="font-semibold text-white text-sm">YouTube Account</h3>
-          <p className="text-xs text-white/50 mt-0.5">
-            Paste your YouTube cookies to get personalised home feed, history, liked songs and more.
-            Cookies are encrypted on your device and never stored on any server.
+    <div className="rounded-2xl border border-border bg-card text-card-foreground overflow-hidden mb-3">
+      <div className="flex items-center gap-3 px-4 py-3">
+        <Cookie className="w-5 h-5 text-red-500 shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="font-medium text-sm text-foreground">YouTube Music Account</p>
+          <p className="text-xs text-muted-foreground">
+            {connected ? "✓ Account connected — personalised feed active" : "Not connected"}
           </p>
         </div>
-        <div className="shrink-0">
-          {hasCookies ? (
-            <span className="inline-flex items-center gap-1.5 text-xs text-emerald-400 font-medium">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              Connected
-            </span>
-          ) : (
-            <span className="text-xs text-white/30">Not connected</span>
+        {connected && <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />}
+      </div>
+
+      <div className="border-t border-border/40 px-4 py-3 space-y-3">
+        <button
+          onClick={() => setShowHow(v => !v)}
+          className="flex items-center gap-1 text-xs text-primary font-medium"
+        >
+          {showHow ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          How to get your cookies
+        </button>
+
+        {showHow && (
+          <ol className="text-xs text-muted-foreground space-y-1.5 pl-4 list-decimal">
+            <li>Install <strong className="text-foreground">Get cookies.txt LOCALLY</strong> extension</li>
+            <li>Open <strong className="text-foreground">music.youtube.com</strong> and sign in</li>
+            <li>Click the extension → <strong className="text-foreground">Export as Netscape format</strong></li>
+            <li>Copy everything and paste below</li>
+          </ol>
+        )}
+
+        <textarea
+          value={text}
+          onChange={e => { setText(e.target.value); setMsg("") }}
+          placeholder="Paste music.youtube.com Netscape cookies here..."
+          rows={5}
+          className="w-full rounded-lg border border-border bg-background text-foreground text-xs p-2.5 resize-none focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground font-mono"
+        />
+
+        {msg && (
+          <p className={`text-xs leading-snug ${
+            msg.startsWith("Connected") ? "text-green-600 dark:text-green-400" : "text-destructive"
+          }`}>{msg}</p>
+        )}
+
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            className="rounded-full flex-1"
+            onClick={handleSave}
+            disabled={saving || !text.trim()}
+          >
+            {connected ? "Update Cookies" : "Connect Account"}
+          </Button>
+          {connected && (
+            <Button size="sm" variant="outline" className="rounded-full" onClick={handleRemove}>
+              <Trash2 className="w-3.5 h-3.5" />
+            </Button>
           )}
         </div>
       </div>
-
-      {/* Action buttons */}
-      {!showInput && (
-        <div className="flex gap-2 flex-wrap">
-          <button
-            onClick={() => setShowInput(true)}
-            className="text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
-          >
-            {hasCookies ? "Update cookies" : "Add cookies"}
-          </button>
-          {hasCookies && (
-            <button
-              onClick={handleRemove}
-              className="text-xs px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors"
-            >
-              Remove
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Input area */}
-      {showInput && (
-        <div className="space-y-3">
-          <div className="text-xs text-white/40 space-y-1.5 bg-white/5 rounded-lg p-3">
-            <p className="text-white/60 font-medium">How to get your cookies:</p>
-            <ol className="list-decimal list-inside space-y-1">
-              <li>Install the <span className="text-white/80">"Get cookies.txt LOCALLY"</span> browser extension</li>
-              <li>Go to <span className="text-white/80">youtube.com</span> and make sure you're signed in</li>
-              <li>Click the extension → <span className="text-white/80">Export</span> → copy all text</li>
-              <li>Paste below</li>
-            </ol>
-          </div>
-
-          <textarea
-            value={input}
-            onChange={e => { setInput(e.target.value); setError("") }}
-            placeholder="# Netscape HTTP Cookie File&#10;.youtube.com	TRUE	/	TRUE	..."
-            rows={6}
-            className="w-full rounded-lg bg-black/40 border border-white/10 text-xs text-white/80 font-mono p-3 resize-none focus:outline-none focus:border-white/30 placeholder:text-white/20"
-          />
-
-          {error && <p className="text-xs text-red-400">{error}</p>}
-
-          {status === "saved" && (
-            <p className="text-xs text-emerald-400">✓ Cookies saved and encrypted on your device</p>
-          )}
-
-          <div className="flex gap-2">
-            <button
-              onClick={handleSave}
-              disabled={status === "saving"}
-              className="text-xs px-4 py-1.5 rounded-lg bg-white text-black font-medium hover:bg-white/90 disabled:opacity-50 transition-colors"
-            >
-              {status === "saving" ? "Saving…" : "Save"}
-            </button>
-            <button
-              onClick={() => { setShowInput(false); setInput(""); setError("") }}
-              className="text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Privacy note */}
-      <p className="text-[11px] text-white/25 leading-relaxed">
-        Your cookies are encrypted with AES-256-GCM using a key derived from your device ID and stored only in your browser.
-        They are sent encrypted with each request and immediately discarded after use — nothing is logged on our servers.
-      </p>
     </div>
   )
 }
